@@ -2,7 +2,7 @@
 
 ## Overview
 
-A 5-stage interactive pipeline for segmenting and annotating industrial LiDAR point clouds (pipe stations, pumping stations, process plants). Extracted from a NavVis scan annotation project, generalized for any industrial point cloud.
+A multi-stage interactive pipeline for segmenting and annotating industrial LiDAR point clouds (pipe stations, pumping stations, process plants). Extracted from a NavVis scan annotation project, generalized for any industrial point cloud.
 
 ## Architecture
 
@@ -27,26 +27,28 @@ Each stage is a self-contained Python HTTP server + Three.js browser frontend. N
                                │ instance_labels.npy
                                │ ransac_summary.json
                     ┌──────────▼──────────┐
-            Stage 2 │   ipl label         │  Interactive GT annotation
-                    │                     │  Merge segments → labeled GT
+                    │                     │
+            Stage 2 │   ipl annotate      │  Unified annotation tool
+                    │                     │  3 sub-stages in one tool:
+                    │  ┌────────────────┐ │
+                    │  │ 2a: Label &    │ │  Assign classes, split
+                    │  │     Split      │ │  multi-object segments
+                    │  │ [Finalize]     │ │
+                    │  ├────────────────┤ │
+                    │  │ 2b: Instance   │ │  Merge patches into
+                    │  │     Merge      │ │  complete instances
+                    │  │ [Finalize]     │ │
+                    │  ├────────────────┤ │
+                    │  │ 2c: Connection │ │  Review/create edges
+                    │  │     Graph      │ │  3D left + 2D graph right
+                    │  │ [Export]       │ │
+                    │  └────────────────┘ │
                     └──────────┬──────────┘
-                               │ gt_labels.npy, gt_classes.npy
-                               │ gt_metadata.json
-                    ┌──────────▼──────────┐
-   (optional)       │   ipl doubles       │  Dissect overlapping scans
-            Stage 3 │                     │  OBB selection, split groups
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-          Stage 4a  │   ipl build-graph   │  Pipe endpoint connectivity
-                    └──────────┬──────────┘
-                               │ adjacency_graph.json
-                    ┌──────────▼──────────┐
-          Stage 4b  │   ipl review-graph  │  Accept/reject edges
-                    └──────────┬──────────┘
+                               │ patch_ids.npy, patch_classes.npy
+                               │ instance_ids.npy, instance_classes.npy
                                │ reviewed_edges.json
                     ┌──────────▼──────────┐
-            Stage 5 │  ipl describe-equip │  Free-text equipment labels
+            Stage 3 │  ipl describe-equip │  Free-text equipment labels
                     └─────────────────────┘
 ```
 
@@ -65,52 +67,99 @@ Automated instance segmentation. No user interaction.
 **Inputs:** PLY point cloud
 **Outputs:** `instance_labels.npy`, `ransac_summary.json`, colored PLY visualizations
 
-### Stage 2: GT Annotation (`labeler/server.py` + `labeler/viewer.html`)
+### Stage 2: Unified Annotation (`labeler/server.py` + `labeler/viewer.html`)
 
-The primary interactive tool. Merge-based workflow.
+One tool, three sub-stages with explicit Finalize checkpoints between them. Each sub-stage saves its output independently — redoing a later stage doesn't lose earlier work.
 
-- Ctrl+Click to select segments in 3D viewport
-- Keyboard shortcuts (configurable via classes.yaml) to assign class labels
-- Merge multiple RANSAC segments into one GT segment
-- Unmerge to undo
-- Split-view: point cloud (left) + GLB mesh (right)
-- Context cloud: full scene subsampled at 30% opacity
-- Auto-save with 500ms debounce
-- SHA256 fingerprint validation on session resume (prevents silent corruption)
-- Auto-backup of source labels on first run
+#### Sub-stage 2a: Label & Split
 
-**Inputs:** PLY, instance_labels.npy, ransac_summary.json (optional), mesh.glb (optional)
-**Outputs:** gt_labels.npy, gt_classes.npy, gt_metadata.json, gt_session.json
+Starting from RANSAC pre-segments, assign class labels and split segments that span multiple physical objects.
 
-### Stage 3: Doubles Dissection (`doubles/server.py` + `doubles/viewer.html`)
+**Invariant:** Every output patch has exactly one class label and belongs to at most one physical object. Patches may be fragments (completeness comes in 2b).
 
-Handles segments from overlapping scan regions. Optional stage.
+- Ctrl+Click to select segments, Ctrl+Enter to assign class label (pipe, tank, equipment, structural)
+- "Split Selected" button opens OBB splitter in a new browser tab
+  - Splitter adapted from doubles_viewer: OBB box drawing, group assignment
+  - Fetches full-resolution point data from server (`/split-data`)
+  - POSTs results back (`/apply-split`), creates new segments, removes originals
+  - Unassigned points become a remainder segment
+- "Refresh" button in main tool to pick up new segments after split
+- Split history recorded in session for reconstruction
 
-- 3-panel layout: segment list, 3D viewer, groups panel
-- Draw oriented bounding box (click+drag, WASD/QE adjust)
-- Color modes: Original / Curvature / Groups
-- Assign points to physical objects within a "double" segment
+**Finalize Patches** button saves:
+- `patch_ids.npy` — per-point patch ID (int32, -1 for unlabeled)
+- `patch_classes.npy` — per-point class ID (int32, -1 for unlabeled)
+- `patch_metadata.json` — patch count, class distribution, split history
 
-**Inputs:** Pre-extracted per-segment PLY files + manifest.json
-**Outputs:** splits.json
+#### Sub-stage 2b: Instance Merge
 
-### Stage 4: Connectivity Graph (`graph/builder.py` + `graph/server.py` + `graph/viewer.html`)
+After patches are finalized, merge patches that belong to the same physical object.
 
-Two sub-stages:
+**Invariant:** Every output segment is one complete physical instance with a class label.
 
-**4a — Build:** For each pipe segment, find two endpoints via PCA projection (top/bottom 10% of axis). KD-tree query for nearby process-class points within threshold distance.
+- Sidebar shows labeled patches grouped by class
+- Ctrl+Click to select patches belonging to the same instance
+- Ctrl+Enter to confirm merge (class inherited from patches — all must share the same class)
+- Existing confirmed/unconfirmed navigation still works
 
-**4b — Review:** Interactive accept/reject/skip per edge. 2D force-directed graph view (G key). Manual edge creation (click two segments). Fingerprint validation on resume.
+**Finalize Instances** button saves:
+- `instance_ids.npy` — per-point instance ID (int32)
+- `instance_classes.npy` — per-point class ID (int32)
+- `instance_metadata.json` — instance count, class distribution, per-instance info
 
-**Inputs:** PLY, gt_labels.npy, gt_metadata.json
-**Outputs:** adjacency_graph.json, reviewed_edges.json
+Between 2b and 2c, `build_connectivity_graph.py` runs offline to generate `adjacency_graph.json`.
 
-### Stage 5: Equipment Description (`equipment/server.py` + `equipment/viewer.html`)
+#### Sub-stage 2c: Connection Graph
+
+Review and edit the connectivity graph describing how instances connect (pipe→valve→tank).
+
+- Split-view layout: 3D point cloud (left) + 2D force-directed graph (right)
+- Sidebar lists edges, click to focus in 3D
+- Accept (A) / Reject (R) / Skip (S) per edge
+- Ctrl+Click to select source/target for manual edge creation
+- Enter to create edge with auto-computed distance
+
+**Export Graph** button saves:
+- `reviewed_edges.json` — accepted/rejected edges with distances and endpoints
+- `graph_session.json` — review progress for resumption
+
+### Stage 3: Equipment Description (`equipment/server.py` + `equipment/viewer.html`)
 
 Browse equipment-class segments and annotate with free-text descriptions (valve, flange, pump, etc.). Split-view point cloud + mesh.
 
-**Inputs:** PLY, gt_labels.npy, ransac_summary.json, adjacency_graph.json, mesh.glb (optional)
+**Inputs:** PLY, instance labels, adjacency graph, mesh.glb (optional)
 **Outputs:** equipment_descriptions.json
+
+## Server Routes (Unified Annotation Tool)
+
+| Route | Method | Sub-stage | Purpose |
+|-------|--------|-----------|---------|
+| `/` | GET | all | Main viewer HTML |
+| `/data` | GET | all | Segment + session data |
+| `/save` | POST | all | Save session state |
+| `/split` | GET | 2a | Serve splitter HTML |
+| `/split-data` | GET | 2a | Full-res point data for selected segments |
+| `/apply-split` | POST | 2a | Apply split results |
+| `/finalize-patches` | POST | 2a→2b | Save patch output, transition to instance merge |
+| `/finalize-instances` | POST | 2b→2c | Save instance output, transition to graph |
+| `/graph-data` | GET | 2c | Adjacency graph + review state |
+| `/add-edge` | POST | 2c | Create manual edge |
+| `/review-edge` | POST | 2c | Accept/reject edge |
+| `/export-graph` | POST | 2c | Export reviewed graph |
+
+## Session State
+
+```json
+{
+  "stage": "label" | "instance" | "graph",
+  "confirmed": [],
+  "hidden_segments": [],
+  "splits": [],
+  "patches_finalized": false,
+  "instances_finalized": false,
+  "graph_reviewed": []
+}
+```
 
 ## Class Configuration
 
@@ -130,9 +179,6 @@ classes:
   structural:
     color: [1.0, 0.8, 0.15]
     key: "4"
-  double:
-    color: [0.6, 0.15, 0.8]
-    key: "5"
 
 process_classes:
   - pipe
@@ -153,9 +199,17 @@ my-site/
 ├── scan.ply
 ├── mesh.glb
 ├── segmentation/             # ipl segment outputs
-├── annotation/               # ipl label outputs
-├── doubles/                  # ipl doubles outputs (optional)
-├── graph/                    # ipl build-graph + review-graph outputs
+├── annotation/               # ipl annotate outputs
+│   ├── gt_session.json
+│   ├── patch_ids.npy         # sub-stage 2a checkpoint
+│   ├── patch_classes.npy
+│   ├── patch_metadata.json
+│   ├── instance_ids.npy      # sub-stage 2b checkpoint
+│   ├── instance_classes.npy
+│   ├── instance_metadata.json
+│   ├── adjacency_graph.json  # built between 2b and 2c
+│   ├── reviewed_edges.json   # sub-stage 2c output
+│   └── graph_session.json
 └── equipment/                # ipl describe-equipment outputs
 ```
 
@@ -163,11 +217,11 @@ Commands simplify to:
 ```bash
 ipl init my-site/ --points scan.ply --mesh mesh.glb
 ipl segment my-site/
-ipl label my-site/
+ipl annotate my-site/
 ipl status my-site/
 ```
 
-Stage dependencies are enforced: `ipl label my-site/` fails with a clear message if `segment` hasn't completed. Each stage stamps `project.yaml` on completion.
+Stage dependencies are enforced: `ipl annotate my-site/` fails with a clear message if `segment` hasn't completed. Each stage stamps `project.yaml` on completion.
 
 Legacy explicit-args mode (`--points`, `--labels`, etc.) still works for advanced use.
 
@@ -176,6 +230,26 @@ Legacy explicit-args mode (`--points`, `--labels`, etc.) still works for advance
 - **Fingerprint validation:** SHA256 of label bytes. On session resume, if the fingerprint doesn't match, the tool searches for a backup and either auto-recovers or aborts with a clear error.
 - **Source backup:** First time the labeler runs, it saves `source_instance_labels.npy` so GT can always be reconstructed even if segmentation is re-run.
 - **Session state:** All interactive tools auto-save on every user action. Sessions can be resumed after closing the browser.
+- **Stage checkpoints:** Each sub-stage output is saved independently. Redoing instance merge doesn't lose patch labels. Redoing graph review doesn't lose instance definitions.
+
+## Data Flow Summary
+
+```
+Input:
+  scan.ply + instance_labels.npy (from RANSAC)
+
+Sub-stage 2a output:
+  patch_ids.npy, patch_classes.npy, patch_metadata.json
+
+Sub-stage 2b output:
+  instance_ids.npy, instance_classes.npy, instance_metadata.json
+
+Between 2b and 2c:
+  Run build_connectivity_graph.py → adjacency_graph.json
+
+Sub-stage 2c output:
+  reviewed_edges.json, graph_session.json
+```
 
 ## Input Format
 
