@@ -126,3 +126,69 @@ def test_apply_split_remainder(sample_cloud):
     assert 101 in pim
     assert len(pim[100]) == 30
     assert len(pim[101]) == 70
+
+
+from industrial_point_labeler.annotate.data import export_patches, export_instances, export_graph
+
+
+def test_export_patches(sample_cloud, tmp_path):
+    xyz, rgb, labels = sample_cloud
+    _, _, _, _, pim = prepare_segments(xyz, rgb, labels)
+    class_map = {"pipe": 0, "tank": 1}
+    session = {
+        "confirmed": [
+            {"gt_id": 0, "label": "pipe", "source_segment_ids": [0]},
+            {"gt_id": 1, "label": "tank", "source_segment_ids": [1, 2]},
+        ],
+    }
+
+    meta = export_patches(session, labels, pim, tmp_path, class_map)
+
+    assert (tmp_path / "patch_ids.npy").exists()
+    assert (tmp_path / "patch_classes.npy").exists()
+    assert (tmp_path / "patch_metadata.json").exists()
+
+    patch_ids = np.load(tmp_path / "patch_ids.npy")
+    assert patch_ids.shape == (300,)
+    assert set(patch_ids[labels == 0]) == {0}
+    assert set(patch_ids[labels == 1]) == {1}
+    assert meta["n_patches"] == 2
+
+
+def test_export_instances(sample_cloud, tmp_path):
+    xyz, rgb, labels = sample_cloud
+    _, _, _, _, pim = prepare_segments(xyz, rgb, labels)
+    class_map = {"pipe": 0, "tank": 1}
+    session = {
+        "instances": [
+            {"instance_id": 0, "label": "pipe", "patch_ids": [0, 1]},
+            {"instance_id": 1, "label": "tank", "patch_ids": [2]},
+        ],
+    }
+
+    meta = export_instances(session, labels, pim, tmp_path, class_map)
+
+    assert (tmp_path / "instance_ids.npy").exists()
+    assert (tmp_path / "instance_classes.npy").exists()
+    assert (tmp_path / "instance_metadata.json").exists()
+    assert meta["n_instances"] == 2
+
+
+def test_export_graph(tmp_path):
+    edges = [
+        {"source": 0, "target": 1, "min_dist": 0.05, "n_close_pairs": 10},
+    ]
+    session = {
+        "reviewed": [
+            {"source": 0, "target": 1, "action": "accept"},
+        ],
+    }
+
+    export_graph(edges, session, tmp_path, "abc123")
+
+    assert (tmp_path / "reviewed_edges.json").exists()
+    import json
+    with open(tmp_path / "reviewed_edges.json") as f:
+        data = json.load(f)
+    assert data["summary"]["accepted"] == 1
+    assert data["labels_fingerprint"] == "abc123"
