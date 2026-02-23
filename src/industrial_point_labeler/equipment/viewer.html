@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Equipment Description Tool</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
+canvas { display: block; }
+
+#sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 280px;
+    background: rgba(15,15,35,0.95); border-right: 1px solid #2a2a4a;
+    display: flex; flex-direction: column; z-index: 100;
+}
+#sidebar-header {
+    padding: 10px 12px; border-bottom: 1px solid #2a2a4a;
+    font-size: 13px; font-weight: bold; color: #60a5fa;
+}
+#progress-bar {
+    padding: 6px 12px; border-bottom: 1px solid #2a2a4a;
+    display: flex; align-items: center; gap: 8px;
+}
+#progress-text { font-size: 12px; color: #7dd3fc; }
+#progress-track {
+    flex: 1; height: 6px; background: #1a1a3a; border-radius: 3px; overflow: hidden;
+}
+#progress-fill {
+    height: 100%; background: #4ade80; border-radius: 3px; transition: width 0.3s;
+}
+#filter-bar {
+    padding: 6px 10px; border-bottom: 1px solid #2a2a4a;
+    display: flex; gap: 6px;
+}
+.btn {
+    padding: 4px 10px; border: 1px solid #3a3a6a; border-radius: 4px;
+    background: #1a1a3a; color: #c0c0e0; cursor: pointer; font-size: 11px;
+    font-family: inherit; transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { background: #2a2a5a; border-color: #5a5a9a; }
+.btn.active { background: #3a3a7a; border-color: #7a7aff; color: #fff; }
+
+#segment-list {
+    flex: 1; overflow-y: auto; font-size: 11px;
+}
+#segment-list .item {
+    padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #1a1a3a;
+    display: flex; align-items: center; gap: 6px;
+    transition: background 0.1s;
+}
+#segment-list .item:hover { background: #1a1a4a; }
+#segment-list .item.active { background: #2a2a6a; border-left: 3px solid #7a7aff; }
+#segment-list .item .seg-id { color: #888; min-width: 36px; }
+#segment-list .item .seg-desc {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#segment-list .item .seg-desc.empty { color: #555; font-style: italic; }
+#segment-list .item .seg-desc.filled { color: #4ade80; }
+#segment-list .item .seg-pts { color: #555; font-size: 10px; flex-shrink: 0; }
+#segment-list .item .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+#segment-list .item .status-dot.done { background: #4ade80; }
+#segment-list .item .status-dot.pending { background: #3a3a5a; }
+
+#bottom-panel {
+    position: fixed; bottom: 0; left: 280px; right: 0;
+    background: rgba(15,15,35,0.95); border-top: 1px solid #2a2a4a;
+    padding: 10px 16px; z-index: 100;
+}
+#desc-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+#desc-input {
+    flex: 1; padding: 6px 10px; border: 1px solid #3a3a6a; border-radius: 4px;
+    background: #1a1a3a; color: #e0e0e0; font-size: 13px; font-family: inherit;
+    outline: none;
+}
+#desc-input:focus { border-color: #7a7aff; }
+#desc-input::placeholder { color: #555; }
+#presets {
+    display: flex; flex-wrap: wrap; gap: 4px;
+}
+.preset-btn {
+    padding: 3px 8px; border: 1px solid #2a2a4a; border-radius: 12px;
+    background: #1a1a2a; color: #aaa; cursor: pointer; font-size: 11px;
+    font-family: inherit; transition: all 0.15s;
+}
+.preset-btn:hover { background: #2a2a5a; border-color: #5a5a9a; color: #e0e0e0; }
+.preset-btn.matched { background: #1a3a2a; border-color: #4ade80; color: #4ade80; }
+#nav-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px;
+}
+#nav-info { font-size: 12px; color: #888; }
+#save-indicator { font-size: 11px; color: #666; margin-left: auto; }
+
+#loading {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(10,10,26,0.95); z-index: 500;
+    transition: opacity 0.5s;
+}
+#loading.hidden { opacity: 0; pointer-events: none; }
+.spinner {
+    width: 48px; height: 48px; border: 4px solid #2a2a4a;
+    border-top-color: #7a7aff; border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin-bottom: 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading .text { color: #7dd3fc; font-size: 15px; }
+
+#help-bar {
+    position: fixed; top: 6px; right: 12px;
+    font-size: 10px; color: #444; z-index: 150; padding: 4px;
+}
+#help-bar kbd {
+    background: #2a2a4a; padding: 1px 4px; border-radius: 2px;
+    color: #666; border: 1px solid #3a3a5a;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+    <div class="spinner"></div>
+    <div class="text">Loading equipment segments...</div>
+</div>
+
+<div id="sidebar">
+    <div id="sidebar-header">Equipment Descriptions</div>
+    <div id="progress-bar">
+        <span id="progress-text">0/0</span>
+        <div id="progress-track"><div id="progress-fill" style="width:0%"></div></div>
+    </div>
+    <div id="filter-bar">
+        <button class="btn active" id="flt-all" onclick="setFilter('all')">All</button>
+        <button class="btn" id="flt-undescribed" onclick="setFilter('undescribed')">Undescribed</button>
+        <button class="btn" id="flt-described" onclick="setFilter('described')">Described</button>
+    </div>
+    <div id="segment-list"></div>
+</div>
+
+<div id="bottom-panel">
+    <div id="desc-row">
+        <input type="text" id="desc-input" placeholder="Type equipment description..." disabled>
+        <button class="btn" id="btn-prev" onclick="stepNav(-1)">&#9664; Prev</button>
+        <button class="btn" id="btn-next" onclick="stepNav(1)">Next &#9654;</button>
+    </div>
+    <div id="presets"></div>
+    <div id="nav-row">
+        <span id="nav-info"></span>
+        <span id="save-indicator"></span>
+    </div>
+</div>
+
+<div id="help-bar">
+    <kbd>&#8592;&#8594;</kbd> navigate &nbsp;
+    <kbd>Tab</kbd> focus input &nbsp;
+    <kbd>1-0</kbd> presets
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+
+// ── Constants ──
+const PRESETS = [
+    'valve', 'flange', 'reducer', 'elbow', 'tee',
+    'pump', 'support', 'bracket', 'gauge', 'instrument',
+    'nozzle', 'coupling', 'cap', 'gasket', 'other'
+];
+
+// ── State ──
+let allSegments = [];
+let descriptions = {};
+let hasMesh = false;
+let filter = 'all';
+let navIndex = -1;
+let currentSegId = null;
+
+// Three.js objects
+let pcCloud = null;
+let bboxHelper = null;
+let meshLoaded = false;
+let meshBboxHelper = null;
+
+// Save debounce
+let saveTimer = null;
+
+// ── Three.js Setup — Split View ──
+const sidebarW = 280;
+const bottomH = 110;
+
+// Point cloud (left half)
+const pcScene = new THREE.Scene();
+pcScene.background = new THREE.Color(0x0a0a1a);
+const pcCamera = new THREE.PerspectiveCamera(60, 1, 0.01, 500);
+
+const pcContainer = document.createElement('div');
+pcContainer.style.cssText = 'position:fixed; overflow:hidden;';
+document.body.appendChild(pcContainer);
+
+const pcRenderer = new THREE.WebGLRenderer({ antialias: true });
+pcContainer.appendChild(pcRenderer.domElement);
+
+const pcControls = new THREE.OrbitControls(pcCamera, pcContainer);
+pcControls.enableDamping = true;
+pcControls.dampingFactor = 0.1;
+
+// Mesh (right half) — shows the full original mesh, zoomed to segment bbox
+const meshScene = new THREE.Scene();
+meshScene.background = new THREE.Color(0x0a0a1a);
+meshScene.add(new THREE.AmbientLight(0xffffff, 1.0));
+const meshCamera = new THREE.PerspectiveCamera(60, 1, 0.01, 500);
+
+const meshContainer = document.createElement('div');
+meshContainer.style.cssText = 'position:fixed; overflow:hidden;';
+document.body.appendChild(meshContainer);
+
+const meshRenderer = new THREE.WebGLRenderer({ antialias: true });
+meshContainer.appendChild(meshRenderer.domElement);
+
+const meshControls = new THREE.OrbitControls(meshCamera, meshContainer);
+meshControls.enableDamping = true;
+meshControls.dampingFactor = 0.1;
+
+// Sync cameras: when one orbits, mirror to the other
+let syncingCamera = false;
+pcControls.addEventListener('change', function() {
+    if (syncingCamera) return;
+    syncingCamera = true;
+    meshCamera.position.copy(pcCamera.position);
+    meshCamera.quaternion.copy(pcCamera.quaternion);
+    meshControls.target.copy(pcControls.target);
+    meshControls.update();
+    syncingCamera = false;
+});
+meshControls.addEventListener('change', function() {
+    if (syncingCamera) return;
+    syncingCamera = true;
+    pcCamera.position.copy(meshCamera.position);
+    pcCamera.quaternion.copy(meshCamera.quaternion);
+    pcControls.target.copy(meshControls.target);
+    pcControls.update();
+    syncingCamera = false;
+});
+
+function resize() {
+    var fullW = window.innerWidth - sidebarW;
+    var h = window.innerHeight - bottomH;
+    var halfW = Math.floor(fullW / 2);
+
+    pcContainer.style.left = sidebarW + 'px';
+    pcContainer.style.top = '0px';
+    pcContainer.style.width = halfW + 'px';
+    pcContainer.style.height = h + 'px';
+    pcRenderer.setSize(halfW, h);
+    pcRenderer.setPixelRatio(window.devicePixelRatio);
+    pcCamera.aspect = halfW / h;
+    pcCamera.updateProjectionMatrix();
+
+    meshContainer.style.left = (sidebarW + halfW) + 'px';
+    meshContainer.style.top = '0px';
+    meshContainer.style.width = (fullW - halfW) + 'px';
+    meshContainer.style.height = h + 'px';
+    meshRenderer.setSize(fullW - halfW, h);
+    meshRenderer.setPixelRatio(window.devicePixelRatio);
+    meshCamera.aspect = (fullW - halfW) / h;
+    meshCamera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+// ── Camera Focusing (instant) ──
+function focusCamera(camera, controls, center, extent) {
+    var d = Math.max(extent * 2.5, 0.5);
+    camera.position.set(center.x + d*0.5, center.y + d*0.4, center.z + d*0.5);
+    controls.target.copy(center);
+    controls.update();
+}
+
+function focusSegment(seg) {
+    // Same coordinate space for both views
+    var center = new THREE.Vector3(seg.center[0], seg.center[1], seg.center[2]);
+    focusCamera(pcCamera, pcControls, center, seg.extent);
+    focusCamera(meshCamera, meshControls, center, seg.extent);
+}
+
+// ── Point Cloud ──
+function showPointCloud(seg) {
+    if (pcCloud) { pcScene.remove(pcCloud); pcCloud = null; }
+    if (bboxHelper) { pcScene.remove(bboxHelper); bboxHelper = null; }
+
+    var n = seg.x.length;
+    var geom = new THREE.BufferGeometry();
+    var pos = new Float32Array(n * 3);
+    var col = new Float32Array(n * 3);
+    for (var i = 0; i < n; i++) {
+        pos[i*3] = seg.x[i]; pos[i*3+1] = seg.y[i]; pos[i*3+2] = seg.z[i];
+        col[i*3] = seg.r[i]/255; col[i*3+1] = seg.g[i]/255; col[i*3+2] = seg.b[i]/255;
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    var mat = new THREE.PointsMaterial({
+        size: 0.02, vertexColors: true, sizeAttenuation: true,
+    });
+    pcCloud = new THREE.Points(geom, mat);
+    pcScene.add(pcCloud);
+
+    // Bbox on point cloud side
+    var pad = 0.02;
+    var box = new THREE.Box3(
+        new THREE.Vector3(seg.bbox_min[0]-pad, seg.bbox_min[1]-pad, seg.bbox_min[2]-pad),
+        new THREE.Vector3(seg.bbox_max[0]+pad, seg.bbox_max[1]+pad, seg.bbox_max[2]+pad)
+    );
+    bboxHelper = new THREE.Box3Helper(box, 0x3a3a7a);
+    pcScene.add(bboxHelper);
+}
+
+// ── Mesh — load full GLB once, show bbox on mesh side ──
+function loadFullMesh() {
+    var loader = new THREE.GLTFLoader();
+    loader.load('/mesh.glb', function(gltf) {
+        gltf.scene.traverse(function(child) {
+            if (child.isMesh && child.material) {
+                // Unlit material preserving original texture
+                var oldMat = child.material;
+                var newMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+                if (oldMat.map) newMat.map = oldMat.map;
+                if (oldMat.color) newMat.color.copy(oldMat.color);
+                if (oldMat.vertexColors) newMat.vertexColors = true;
+                child.material = newMat;
+            }
+        });
+        // No coordinate transform — GLTFLoader handles the glTF→Three.js conversion
+        meshScene.add(gltf.scene);
+        meshLoaded = true;
+        console.log('Full mesh loaded');
+    });
+}
+
+function updateMeshBbox(seg) {
+    if (meshBboxHelper) { meshScene.remove(meshBboxHelper); meshBboxHelper = null; }
+    // Mesh and PC share the same coordinate space (GLTFLoader handles the transform)
+    var pad = 0.02;
+    var box = new THREE.Box3(
+        new THREE.Vector3(seg.bbox_min[0]-pad, seg.bbox_min[1]-pad, seg.bbox_min[2]-pad),
+        new THREE.Vector3(seg.bbox_max[0]+pad, seg.bbox_max[1]+pad, seg.bbox_max[2]+pad)
+    );
+    meshBboxHelper = new THREE.Box3Helper(box, 0x60a5fa);
+    meshScene.add(meshBboxHelper);
+}
+
+// ── Navigate to Segment ──
+function navigateTo(index) {
+    var dl = getDisplayList();
+    if (index < 0 || index >= dl.length) return;
+    navIndex = index;
+    var seg = dl[index];
+    currentSegId = seg.id;
+
+    // Update input
+    var input = document.getElementById('desc-input');
+    input.disabled = false;
+    var desc = descriptions[String(seg.id)];
+    input.value = desc ? desc.description : '';
+    updatePresetHighlight();
+
+    // Show point cloud + zoom mesh to bbox
+    showPointCloud(seg);
+    updateMeshBbox(seg);
+    focusSegment(seg);
+
+    updateSidebar();
+    updateNavInfo();
+
+    // Scroll active into view
+    var activeEl = document.querySelector('#segment-list .item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+}
+
+function stepNav(delta) {
+    var dl = getDisplayList();
+    if (dl.length === 0) return;
+    if (navIndex < 0) {
+        navigateTo(delta > 0 ? 0 : dl.length - 1);
+    } else {
+        navigateTo(((navIndex + delta) % dl.length + dl.length) % dl.length);
+    }
+}
+
+// ── Filter ──
+function getDisplayList() {
+    if (filter === 'all') return allSegments;
+    if (filter === 'undescribed') return allSegments.filter(function(s) {
+        return !descriptions[String(s.id)];
+    });
+    return allSegments.filter(function(s) {
+        return !!descriptions[String(s.id)];
+    });
+}
+
+function setFilter(f) {
+    filter = f;
+    navIndex = -1;
+    document.getElementById('flt-all').classList.toggle('active', f === 'all');
+    document.getElementById('flt-undescribed').classList.toggle('active', f === 'undescribed');
+    document.getElementById('flt-described').classList.toggle('active', f === 'described');
+    updateSidebar();
+}
+
+// ── Sidebar ──
+function updateSidebar() {
+    var list = document.getElementById('segment-list');
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    var dl = getDisplayList();
+    dl.forEach(function(seg, i) {
+        var item = document.createElement('div');
+        item.className = 'item' + (i === navIndex ? ' active' : '');
+
+        var dot = document.createElement('span');
+        dot.className = 'status-dot ' + (descriptions[String(seg.id)] ? 'done' : 'pending');
+
+        var idSpan = document.createElement('span');
+        idSpan.className = 'seg-id';
+        idSpan.textContent = '#' + seg.id;
+
+        var descSpan = document.createElement('span');
+        var desc = descriptions[String(seg.id)];
+        if (desc) {
+            descSpan.className = 'seg-desc filled';
+            descSpan.textContent = desc.description;
+        } else {
+            descSpan.className = 'seg-desc empty';
+            descSpan.textContent = 'undescribed';
+        }
+
+        var pts = document.createElement('span');
+        pts.className = 'seg-pts';
+        pts.textContent = seg.n_points.toLocaleString();
+
+        item.appendChild(dot);
+        item.appendChild(idSpan);
+        item.appendChild(descSpan);
+        item.appendChild(pts);
+
+        item.addEventListener('click', function() { navigateTo(i); });
+        list.appendChild(item);
+    });
+
+    updateProgress();
+}
+
+function updateProgress() {
+    var total = allSegments.length;
+    var done = allSegments.filter(function(s) { return !!descriptions[String(s.id)]; }).length;
+    document.getElementById('progress-text').textContent = done + '/' + total + ' described';
+    document.getElementById('progress-fill').style.width = (total > 0 ? (100 * done / total) : 0) + '%';
+}
+
+function updateNavInfo() {
+    var dl = getDisplayList();
+    var info = '';
+    if (navIndex >= 0 && navIndex < dl.length) {
+        var seg = dl[navIndex];
+        info = 'Segment #' + seg.id + ' | ' + seg.n_points + ' pts | ' +
+               (navIndex + 1) + '/' + dl.length;
+    }
+    document.getElementById('nav-info').textContent = info;
+}
+
+// ── Presets ──
+function buildPresets() {
+    var container = document.getElementById('presets');
+    PRESETS.forEach(function(label, i) {
+        var btn = document.createElement('button');
+        btn.className = 'preset-btn';
+        btn.textContent = label;
+        btn.dataset.preset = label;
+        btn.addEventListener('click', function() {
+            applyPreset(label);
+        });
+        container.appendChild(btn);
+    });
+}
+
+function applyPreset(label) {
+    if (currentSegId === null) return;
+    var input = document.getElementById('desc-input');
+    input.value = label;
+    input.focus();
+    saveDescription(label);
+}
+
+function updatePresetHighlight() {
+    var input = document.getElementById('desc-input');
+    var val = input.value.trim().toLowerCase();
+    document.querySelectorAll('.preset-btn').forEach(function(btn) {
+        btn.classList.toggle('matched', btn.dataset.preset === val);
+    });
+}
+
+// ── Save ──
+function saveDescription(text) {
+    if (currentSegId === null) return;
+    var key = String(currentSegId);
+    text = text.trim();
+    if (text) {
+        descriptions[key] = {
+            description: text,
+            updated: new Date().toISOString(),
+        };
+    } else {
+        delete descriptions[key];
+    }
+    updatePresetHighlight();
+    updateSidebar();
+    scheduleSave();
+}
+
+function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 400);
+}
+
+function doSave() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    fetch('/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(descriptions),
+    }).then(function() {
+        var el = document.getElementById('save-indicator');
+        el.textContent = 'Saved ' + new Date().toLocaleTimeString();
+        setTimeout(function() { el.textContent = ''; }, 3000);
+    });
+}
+
+// ── Input Events ──
+document.getElementById('desc-input').addEventListener('input', function() {
+    saveDescription(this.value);
+});
+
+// ── Keyboard ──
+document.addEventListener('keydown', function(e) {
+    var input = document.getElementById('desc-input');
+    var inputFocused = document.activeElement === input;
+
+    // Number keys 1-9,0 for presets (only when input not focused)
+    if (!inputFocused && e.key >= '0' && e.key <= '9') {
+        var idx = e.key === '0' ? 9 : parseInt(e.key) - 1;
+        if (idx < PRESETS.length) {
+            e.preventDefault();
+            applyPreset(PRESETS[idx]);
+        }
+        return;
+    }
+
+    if (e.key === 'ArrowRight' && !inputFocused) { e.preventDefault(); stepNav(1); }
+    else if (e.key === 'ArrowLeft' && !inputFocused) { e.preventDefault(); stepNav(-1); }
+    else if (e.key === 'Tab' && !e.shiftKey && !inputFocused) {
+        e.preventDefault();
+        input.focus();
+        input.select();
+    }
+    else if (e.key === 'Escape' && inputFocused) {
+        e.preventDefault();
+        input.blur();
+    }
+    else if (e.key === 'Enter' && inputFocused) {
+        e.preventDefault();
+        input.blur();
+        stepNav(1);
+    }
+    else if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        doSave();
+    }
+});
+
+// ── Render Loop ──
+function animate() {
+    requestAnimationFrame(animate);
+    pcControls.update();
+    meshControls.update();
+    pcRenderer.render(pcScene, pcCamera);
+    meshRenderer.render(meshScene, meshCamera);
+}
+
+// ── Init ──
+buildPresets();
+
+fetch('/data')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        allSegments = data.segments;
+        descriptions = data.descriptions || {};
+        hasMesh = data.has_mesh;
+
+        resize();
+        updateSidebar();
+
+        // Load the full mesh in the background
+        if (hasMesh) {
+            loadFullMesh();
+        }
+
+        document.getElementById('loading').classList.add('hidden');
+        animate();
+
+        // Auto-navigate to first undescribed
+        var firstUndesc = allSegments.findIndex(function(s) {
+            return !descriptions[String(s.id)];
+        });
+        if (firstUndesc >= 0) {
+            navigateTo(firstUndesc);
+        } else if (allSegments.length > 0) {
+            navigateTo(0);
+        }
+    });
+
+</script>
+</body>
+</html>
