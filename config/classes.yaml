@@ -18,9 +18,6 @@ classes:
   structural:
     color: [1.0, 0.8, 0.15]
     key: "4"
-  double:
-    color: [0.6, 0.15, 0.8]
-    key: "5"
 
 # Which classes are "process" classes used for graph connectivity
 process_classes:
