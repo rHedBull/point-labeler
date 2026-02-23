@@ -53,3 +53,18 @@ def test_prepare_segments_with_summary(sample_cloud):
     seg0 = next(s for s in segments if s["id"] == 0)
     assert seg0["type"] == "cylinder"
     assert seg0["radius"] == 0.05
+
+
+from industrial_point_labeler.annotate.data import prepare_graph_segments
+
+
+def test_prepare_graph_segments_filters_by_nodes(sample_cloud):
+    xyz, rgb, labels = sample_cloud
+    nodes = [
+        {"id": 0, "label": "pipe"},
+        {"id": 2, "label": "tank"},
+    ]
+    segments, context, center, extent = prepare_graph_segments(xyz, rgb, labels, nodes)
+    seg_ids = {s["id"] for s in segments}
+    assert seg_ids == {0, 2}
+    assert all(s["label"] in ("pipe", "tank") for s in segments)

@@ -97,3 +97,73 @@ def prepare_segments(xyz, rgb, labels, summary=None):
     scene_extent = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0)))
 
     return segments, context, scene_center, scene_extent, point_indices_map
+
+
+def prepare_graph_segments(xyz, rgb, labels, graph_nodes):
+    """Build per-segment data for process-relevant graph nodes only.
+
+    Returns (segments, context, scene_center, scene_extent).
+    """
+    np.random.seed(42)
+
+    node_map = {n["id"]: n for n in graph_nodes}
+    node_ids = set(node_map.keys())
+
+    segments = []
+    for sid in sorted(node_ids):
+        mask = labels == sid
+        count = int(mask.sum())
+        if count < 5:
+            continue
+
+        pts = xyz[mask]
+        cols = rgb[mask]
+
+        node = node_map[sid]
+        center = ((pts.min(axis=0) + pts.max(axis=0)) / 2).tolist()
+        extent = float(np.linalg.norm(pts.max(axis=0) - pts.min(axis=0)))
+
+        seg = {
+            "id": sid,
+            "n_points": count,
+            "label": node.get("label", "unknown"),
+            "center": center,
+            "extent": extent,
+        }
+
+        if count > 2000:
+            idx = np.random.choice(count, 2000, replace=False)
+            pts = pts[idx]
+            cols = cols[idx]
+
+        seg["x"] = pts[:, 0].tolist()
+        seg["y"] = pts[:, 1].tolist()
+        seg["z"] = pts[:, 2].tolist()
+        seg["r"] = cols[:, 0].tolist()
+        seg["g"] = cols[:, 1].tolist()
+        seg["b"] = cols[:, 2].tolist()
+        segments.append(seg)
+
+    max_ctx = 50000
+    if len(xyz) > max_ctx:
+        idx = np.random.choice(len(xyz), max_ctx, replace=False)
+        idx.sort()
+        ctx_xyz = xyz[idx]
+        ctx_rgb = rgb[idx]
+    else:
+        ctx_xyz = xyz
+        ctx_rgb = rgb
+
+    context = {
+        "x": ctx_xyz[:, 0].tolist(),
+        "y": ctx_xyz[:, 1].tolist(),
+        "z": ctx_xyz[:, 2].tolist(),
+        "r": ctx_rgb[:, 0].tolist(),
+        "g": ctx_rgb[:, 1].tolist(),
+        "b": ctx_rgb[:, 2].tolist(),
+    }
+
+    scene_center = ((xyz.min(axis=0) + xyz.max(axis=0)) / 2).tolist()
+    scene_extent = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0)))
+
+    return segments, context, scene_center, scene_extent
