@@ -1,0 +1,29 @@
+# Class definitions for the annotation pipeline.
+# Edit this file to match your domain.
+#
+# Each class has:
+#   color: [r, g, b] floats 0-1, used in the 3D viewer
+#   key: keyboard shortcut in the labeler (1-9)
+
+classes:
+  pipe:
+    color: [0.15, 0.8, 0.15]
+    key: "1"
+  tank:
+    color: [1.0, 0.15, 0.15]
+    key: "2"
+  equipment:
+    color: [0.15, 0.15, 1.0]
+    key: "3"
+  structural:
+    color: [1.0, 0.8, 0.15]
+    key: "4"
+  double:
+    color: [0.6, 0.15, 0.8]
+    key: "5"
+
+# Which classes are "process" classes used for graph connectivity
+process_classes:
+  - pipe
+  - tank
+  - equipment
