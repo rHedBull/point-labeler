@@ -167,3 +167,90 @@ def prepare_graph_segments(xyz, rgb, labels, graph_nodes):
     scene_extent = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0)))
 
     return segments, context, scene_center, scene_extent
+
+
+def get_split_data(xyz, rgb, point_indices_map, segment_ids):
+    """Return full-resolution point data for the given segments (no subsampling).
+
+    Returns dict with x, y, z, r, g, b, segment_ids (per-point) lists.
+    """
+    all_pts = []
+    all_cols = []
+    all_seg_ids = []
+
+    for sid in segment_ids:
+        if sid not in point_indices_map:
+            continue
+        indices = point_indices_map[sid]
+        all_pts.append(xyz[indices])
+        all_cols.append(rgb[indices])
+        all_seg_ids.append(np.full(len(indices), sid, dtype=np.int32))
+
+    if not all_pts:
+        return {"x": [], "y": [], "z": [], "r": [], "g": [], "b": [], "segment_ids": []}
+
+    pts = np.vstack(all_pts)
+    cols = np.vstack(all_cols)
+    seg_ids = np.concatenate(all_seg_ids)
+
+    return {
+        "x": pts[:, 0].tolist(),
+        "y": pts[:, 1].tolist(),
+        "z": pts[:, 2].tolist(),
+        "r": cols[:, 0].tolist(),
+        "g": cols[:, 1].tolist(),
+        "b": cols[:, 2].tolist(),
+        "segment_ids": seg_ids.tolist(),
+    }
+
+
+def apply_split(labels, point_indices_map, segments, split_result, next_segment_id):
+    """Apply a split operation: create new segments, remove originals.
+
+    Mutates labels and point_indices_map in place.
+    Returns (new_segment_entries, next_segment_id).
+    """
+    original_ids = split_result["original_segment_ids"]
+    groups = split_result["groups"]
+
+    # Gather all original point indices in order
+    all_original_indices = []
+    for sid in original_ids:
+        if sid in point_indices_map:
+            all_original_indices.append(point_indices_map[sid])
+    if not all_original_indices:
+        return [], next_segment_id
+    all_original_indices = np.concatenate(all_original_indices)
+
+    # Track which points are assigned to a group
+    assigned = np.zeros(len(all_original_indices), dtype=bool)
+    new_segs = []
+    cur_id = next_segment_id
+
+    for g in groups:
+        pidx = np.array(g["point_indices"], dtype=np.int64)
+        real_indices = all_original_indices[pidx]
+        labels[real_indices] = cur_id
+        point_indices_map[cur_id] = real_indices
+        assigned[pidx] = True
+        new_segs.append({"id": cur_id, "group": g["group"], "n_points": len(real_indices)})
+        cur_id += 1
+
+    # Remainder: unassigned points
+    remainder_pidx = np.where(~assigned)[0]
+    if len(remainder_pidx) > 0:
+        real_indices = all_original_indices[remainder_pidx]
+        labels[real_indices] = cur_id
+        point_indices_map[cur_id] = real_indices
+        new_segs.append({"id": cur_id, "group": "_remainder", "n_points": len(real_indices)})
+        cur_id += 1
+
+    # Remove originals
+    for sid in original_ids:
+        point_indices_map.pop(sid, None)
+        for i, s in enumerate(segments):
+            if s["id"] == sid:
+                segments.pop(i)
+                break
+
+    return new_segs, cur_id
