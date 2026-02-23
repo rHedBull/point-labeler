@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "industrial-point-labeler"
+version = "0.1.0"
+description = "Interactive segmentation and annotation toolkit for industrial LiDAR point clouds"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "plyfile>=1.0",
+    "scipy>=1.10",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+segmentation = ["open3d>=0.17", "scikit-learn>=1.2"]
+
+[project.scripts]
+ipl = "industrial_point_labeler.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/industrial_point_labeler"]
