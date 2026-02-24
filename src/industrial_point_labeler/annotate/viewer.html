@@ -34,7 +34,10 @@ canvas { display: block; }
     position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
     background: rgba(15,15,35,0.95); border-right: 1px solid #2a2a4a;
     display: flex; flex-direction: column; z-index: 100;
+    overflow: hidden;
 }
+#sidebar > div { flex-shrink: 0; }
+#sidebar > div:not(#segment-list) { flex-wrap: wrap; }
 #sidebar-header {
     padding: 10px 12px; border-bottom: 1px solid #2a2a4a;
     font-size: 13px; font-weight: bold; color: #7dd3fc;
@@ -150,7 +153,7 @@ canvas { display: block; }
 
 <div id="sidebar">
     <div id="sidebar-header">Annotation</div>
-    <div style="padding:6px 10px; border-bottom:1px solid #2a2a4a; display:flex; gap:6px;">
+    <div style="padding:6px 10px; border-bottom:1px solid #2a2a4a; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
         <button class="btn active" id="btn-unconfirmed" onclick="setMode('unconfirmed')">Unconfirmed</button>
         <button class="btn" id="btn-confirmed" onclick="setMode('confirmed')">Confirmed</button>
         <button class="btn" id="btn-all" onclick="setMode('all')">All</button>
@@ -163,11 +166,16 @@ canvas { display: block; }
         <button class="btn" style="padding:2px 6px; font-size:10px;" id="flt-equipment" onclick="setLabelFilter('equipment')"><span class="class-badge class-equipment" style="margin:0;">equip</span></button>
         <button class="btn" style="padding:2px 6px; font-size:10px;" id="flt-structural" onclick="setLabelFilter('structural')"><span class="class-badge class-structural" style="margin:0;">struct</span></button>
     </div>
-    <div id="visibility-bar" style="padding:4px 10px; border-bottom:1px solid #2a2a4a; display:flex; gap:4px; align-items:center;">
+    <div id="visibility-bar" style="padding:4px 10px; border-bottom:1px solid #2a2a4a; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
         <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="showAllSegments()">Show All</button>
         <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="hideAllSegments()">Hide All</button>
-        <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="showOnlyFiltered()">Show Only Filtered</button>
-        <span id="visibility-count" style="font-size:10px; color:#666; margin-left:auto;"></span>
+        <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="showOnlyFiltered()">Only Filtered</button>
+        <span id="visibility-count" style="font-size:10px; color:#555; margin-left:auto;"></span>
+    </div>
+    <div id="minpts-bar" style="padding:4px 10px; border-bottom:1px solid #2a2a4a; display:flex; gap:4px; align-items:center;">
+        <span style="font-size:10px; color:#666; white-space:nowrap;">Min pts:</span>
+        <input type="range" id="minpts-slider" min="0" max="1000" value="0" step="10" style="flex:1; accent-color:#7a7aff;" oninput="applyMinPoints(this.value)">
+        <input type="number" id="minpts-value" value="0" min="0" max="10000" style="width:45px; background:#1a1a2a; border:1px solid #3a3a6a; color:#e0e0e0; border-radius:3px; padding:1px 4px; font-size:10px; font-family:monospace;" onchange="applyMinPoints(this.value)">
     </div>
     <div id="segment-list"></div>
 </div>
@@ -974,6 +982,39 @@ function updateVisibilityCount() {
     var nVisible = allSegments.length - session.hidden_segments.length;
     var el = document.getElementById('visibility-count');
     if (el) el.textContent = nVisible + '/' + allSegments.length + ' visible';
+}
+
+var minPointsThreshold = 0;
+function applyMinPoints(val) {
+    val = parseInt(val) || 0;
+    minPointsThreshold = val;
+    document.getElementById('minpts-slider').value = Math.min(val, 1000);
+    document.getElementById('minpts-value').value = val;
+    // Hide segments below threshold, unhide those above (unless manually hidden for other reasons)
+    var hidden = 0;
+    var hiddenSet = new Set(session.hidden_segments);
+    for (var i = 0; i < allSegments.length; i++) {
+        var seg = allSegments[i];
+        if (seg.n_points < val) {
+            if (!hiddenSet.has(seg.id)) {
+                session.hidden_segments.push(seg.id);
+                hiddenSet.add(seg.id);
+            }
+            hidden++;
+        } else if (hiddenSet.has(seg.id) && seg._hidden_by_minpts) {
+            // Only unhide if it was hidden by this filter, not manually
+            session.hidden_segments = session.hidden_segments.filter(function(sid) { return sid !== seg.id; });
+            hiddenSet.delete(seg.id);
+            seg._hidden_by_minpts = false;
+        }
+    }
+    // Mark newly hidden segments so we can unhide them later
+    for (var i = 0; i < allSegments.length; i++) {
+        if (allSegments[i].n_points < val) allSegments[i]._hidden_by_minpts = true;
+    }
+    updateSegmentVisuals();
+    buildSidebarList();
+    updateVisibilityCount();
 }
 
 // ── Navigation ──
