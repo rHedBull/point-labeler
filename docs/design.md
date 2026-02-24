@@ -27,30 +27,30 @@ Each stage is a self-contained Python HTTP server + Three.js browser frontend. N
                                │ instance_labels.npy
                                │ ransac_summary.json
                     ┌──────────▼──────────┐
-                    │                     │
-            Stage 2 │   ipl annotate      │  Unified annotation tool
-                    │                     │  3 sub-stages in one tool:
-                    │  ┌────────────────┐ │
-                    │  │ 2a: Label &    │ │  Assign classes, split
-                    │  │     Split      │ │  multi-object segments
-                    │  │ [Finalize]     │ │
-                    │  ├────────────────┤ │
-                    │  │ 2b: Instance   │ │  Merge patches into
-                    │  │     Merge      │ │  complete instances
-                    │  │ [Finalize]     │ │
-                    │  ├────────────────┤ │
-                    │  │ 2c: Connection │ │  Review/create edges
-                    │  │     Graph      │ │  3D left + 2D graph right
-                    │  │ [Export]       │ │
-                    │  └────────────────┘ │
+            Stage 2 │   ipl annotate      │  Assign classes, split
+                    │   Label & Split     │  multi-object segments
+                    │   [Finalize]        │
                     └──────────┬──────────┘
                                │ patch_ids.npy, patch_classes.npy
-                               │ instance_ids.npy, instance_classes.npy
-                               │ reviewed_edges.json
                     ┌──────────▼──────────┐
-            Stage 3 │  ipl describe-equip │  Free-text equipment labels
+            Stage 3 │   ipl annotate      │  Merge patches into
+                    │   Instance Merge    │  complete instances
+                    │   [Finalize]        │
+                    └──────────┬──────────┘
+                               │ instance_ids.npy, instance_classes.npy
+                               │ adjacency_graph.json (auto-built)
+                    ┌──────────▼──────────┐
+            Stage 4 │   ipl annotate      │  Review/create edges
+                    │   Connection Graph  │  3D left + 2D graph right
+                    │   [Export]          │
+                    └──────────┬──────────┘
+                               │ connectivity_graph.json
+                    ┌──────────▼──────────┐
+            Stage 5 │  ipl describe-equip │  Free-text equipment labels
                     └─────────────────────┘
 ```
+
+Stages 2–4 share a single `ipl annotate` server process with server-side transitions between them.
 
 ### Stage 1: RANSAC Segmentation (`segmentation/ransac.py`)
 
@@ -67,15 +67,11 @@ Automated instance segmentation. No user interaction.
 **Inputs:** PLY point cloud
 **Outputs:** `instance_labels.npy`, `ransac_summary.json`, colored PLY visualizations
 
-### Stage 2: Unified Annotation (`labeler/server.py` + `labeler/viewer.html`)
-
-One tool, three sub-stages with explicit Finalize checkpoints between them. Each sub-stage saves its output independently — redoing a later stage doesn't lose earlier work.
-
-#### Sub-stage 2a: Label & Split
+### Stage 2: Label & Split (`annotate/server.py` + `annotate/viewer.html`)
 
 Starting from RANSAC pre-segments, assign class labels and split segments that span multiple physical objects.
 
-**Invariant:** Every output patch has exactly one class label and belongs to at most one physical object. Patches may be fragments (completeness comes in 2b).
+**Invariant:** Every output patch has exactly one class label and belongs to at most one physical object. Patches may be fragments (completeness comes in stage 3).
 
 - Ctrl+Click to select segments, Ctrl+Enter to assign class label (pipe, tank, equipment, structural)
 - "Split Selected" button opens OBB splitter in a new browser tab
@@ -89,9 +85,9 @@ Starting from RANSAC pre-segments, assign class labels and split segments that s
 **Finalize Patches** button saves:
 - `patch_ids.npy` — per-point patch ID (int32, -1 for unlabeled)
 - `patch_classes.npy` — per-point class ID (int32, -1 for unlabeled)
-- `patch_metadata.json` — patch count, class distribution, split history
+- `patch_metadata.json` — patch count, class distribution, split history, input fingerprints
 
-#### Sub-stage 2b: Instance Merge
+### Stage 3: Instance Merge (`annotate/server.py` + `annotate/viewer.html`)
 
 After patches are finalized, merge patches that belong to the same physical object.
 
@@ -105,11 +101,11 @@ After patches are finalized, merge patches that belong to the same physical obje
 **Finalize Instances** button saves:
 - `instance_ids.npy` — per-point instance ID (int32)
 - `instance_classes.npy` — per-point class ID (int32)
-- `instance_metadata.json` — instance count, class distribution, per-instance info
+- `instance_metadata.json` — instance count, class distribution, per-instance info, input fingerprints
 
-Between 2b and 2c, `build_connectivity_graph.py` runs offline to generate `adjacency_graph.json`.
+Between stages 3 and 4, `build_connectivity_graph.py` runs automatically to generate `adjacency_graph.json`.
 
-#### Sub-stage 2c: Connection Graph
+### Stage 4: Connection Graph (`annotate/server.py` + `annotate/graph_viewer.html`)
 
 Review and edit the connectivity graph describing how instances connect (pipe→valve→tank).
 
@@ -119,33 +115,36 @@ Review and edit the connectivity graph describing how instances connect (pipe→
 - Ctrl+Click to select source/target for manual edge creation
 - Enter to create edge with auto-computed distance
 
-**Export Graph** button saves:
-- `reviewed_edges.json` — accepted/rejected edges with distances and endpoints
-- `graph_session.json` — review progress for resumption
+**Export Graph** button saves `connectivity_graph.json` — a clean graph containing:
+- **Nodes:** all process-class instances (including isolated nodes with no connections)
+- **Edges:** only accepted connections (rejected/pending edges are omitted)
+- **Metadata:** input fingerprints, creation timestamp, builder threshold
 
-### Stage 3: Equipment Description (`equipment/server.py` + `equipment/viewer.html`)
+Review progress is tracked separately in `graph_session.json` (not exported).
+
+### Stage 5: Equipment Description (`equipment/server.py` + `equipment/viewer.html`)
 
 Browse equipment-class segments and annotate with free-text descriptions (valve, flange, pump, etc.). Split-view point cloud + mesh.
 
-**Inputs:** PLY, instance labels, adjacency graph, mesh.glb (optional)
+**Inputs:** PLY, instance labels, connectivity graph, mesh.glb (optional)
 **Outputs:** equipment_descriptions.json
 
 ## Server Routes (Unified Annotation Tool)
 
-| Route | Method | Sub-stage | Purpose |
-|-------|--------|-----------|---------|
+| Route | Method | Stage | Purpose |
+|-------|--------|-------|---------|
 | `/` | GET | all | Main viewer HTML |
 | `/data` | GET | all | Segment + session data |
 | `/save` | POST | all | Save session state |
-| `/split` | GET | 2a | Serve splitter HTML |
-| `/split-data` | GET | 2a | Full-res point data for selected segments |
-| `/apply-split` | POST | 2a | Apply split results |
-| `/finalize-patches` | POST | 2a→2b | Save patch output, transition to instance merge |
-| `/finalize-instances` | POST | 2b→2c | Save instance output, transition to graph |
-| `/graph-data` | GET | 2c | Adjacency graph + review state |
-| `/add-edge` | POST | 2c | Create manual edge |
-| `/review-edge` | POST | 2c | Accept/reject edge |
-| `/export-graph` | POST | 2c | Export reviewed graph |
+| `/split` | GET | 2 | Serve splitter HTML |
+| `/split-data` | GET | 2 | Full-res point data for selected segments |
+| `/apply-split` | POST | 2 | Apply split results |
+| `/finalize-patches` | POST | 2→3 | Save patch output, transition to instance merge |
+| `/finalize-instances` | POST | 3→4 | Save instance output, build graph, transition to graph review |
+| `/graph-data` | GET | 4 | Adjacency graph + review state |
+| `/add-edge` | POST | 4 | Create manual edge |
+| `/review-edge` | POST | 4 | Accept/reject edge |
+| `/export-graph` | POST | 4 | Export connectivity graph |
 
 ## Session State
 
@@ -198,19 +197,19 @@ my-site/
 ├── classes.yaml              # copied from package, editable
 ├── scan.ply
 ├── mesh.glb
-├── segmentation/             # ipl segment outputs
-├── annotation/               # ipl annotate outputs
+├── segmentation/             # Stage 1 outputs
+├── annotation/               # Stages 2–4 outputs (ipl annotate)
 │   ├── gt_session.json
-│   ├── patch_ids.npy         # sub-stage 2a checkpoint
-│   ├── patch_classes.npy
-│   ├── patch_metadata.json
-│   ├── instance_ids.npy      # sub-stage 2b checkpoint
-│   ├── instance_classes.npy
-│   ├── instance_metadata.json
-│   ├── adjacency_graph.json  # built between 2b and 2c
-│   ├── reviewed_edges.json   # sub-stage 2c output
-│   └── graph_session.json
-└── equipment/                # ipl describe-equipment outputs
+│   ├── patch_ids.v1.npy      # Stage 2 output (versioned)
+│   ├── patch_classes.v1.npy
+│   ├── patch_metadata.v1.json
+│   ├── instance_ids.v1.npy   # Stage 3 output (versioned)
+│   ├── instance_classes.v1.npy
+│   ├── instance_metadata.v1.json
+│   ├── adjacency_graph.json  # Auto-built between stages 3→4
+│   ├── connectivity_graph.v1.json  # Stage 4 output (versioned)
+│   └── graph_session.json    # Stage 4 review progress
+└── equipment/                # Stage 5 outputs
 ```
 
 Commands simplify to:
@@ -230,7 +229,30 @@ Legacy explicit-args mode (`--points`, `--labels`, etc.) still works for advance
 - **Fingerprint validation:** SHA256 of label bytes. On session resume, if the fingerprint doesn't match, the tool searches for a backup and either auto-recovers or aborts with a clear error.
 - **Source backup:** First time the labeler runs, it saves `source_instance_labels.npy` so GT can always be reconstructed even if segmentation is re-run.
 - **Session state:** All interactive tools auto-save on every user action. Sessions can be resumed after closing the browser.
-- **Stage checkpoints:** Each sub-stage output is saved independently. Redoing instance merge doesn't lose patch labels. Redoing graph review doesn't lose instance definitions.
+- **Stage checkpoints:** Each stage's output is saved independently. Redoing stage 3 doesn't lose stage 2's patches. Redoing stage 4 doesn't lose stage 3's instances.
+
+## Versioning
+
+Per-stage output versioning tracks provenance and prevents data loss when re-doing earlier stages.
+
+**Rules:**
+- Each stage's metadata records SHA256 fingerprints of its input files.
+- On finalize, if input fingerprints differ from the last finalized version, a new version is created (e.g. `patch_ids.v2.npy`). If inputs are unchanged, the current version is overwritten in place.
+- On resume, the tool loads the latest version of each stage.
+- **Staleness warnings:** If a downstream stage's recorded input fingerprints don't match the latest upstream outputs, the tool warns the user. Stale outputs are not deleted — the user decides whether to redo.
+
+**Metadata example** (`patch_metadata.v2.json`):
+```json
+{
+  "version": 2,
+  "input_fingerprints": {
+    "instance_labels.npy": "sha256:abc..."
+  },
+  "created": "2026-02-24T14:30:00",
+  "patch_count": 142,
+  "class_distribution": {"pipe": 80, "tank": 12, "equipment": 38, "structural": 12}
+}
+```
 
 ## Data Flow Summary
 
@@ -238,17 +260,17 @@ Legacy explicit-args mode (`--points`, `--labels`, etc.) still works for advance
 Input:
   scan.ply + instance_labels.npy (from RANSAC)
 
-Sub-stage 2a output:
-  patch_ids.npy, patch_classes.npy, patch_metadata.json
+Stage 2 output:
+  patch_ids.v{N}.npy, patch_classes.v{N}.npy, patch_metadata.v{N}.json
 
-Sub-stage 2b output:
-  instance_ids.npy, instance_classes.npy, instance_metadata.json
+Stage 3 output:
+  instance_ids.v{N}.npy, instance_classes.v{N}.npy, instance_metadata.v{N}.json
 
-Between 2b and 2c:
-  Run build_connectivity_graph.py → adjacency_graph.json
+Between stages 3 and 4:
+  Auto-run build_connectivity_graph.py → adjacency_graph.json
 
-Sub-stage 2c output:
-  reviewed_edges.json, graph_session.json
+Stage 4 output:
+  connectivity_graph.v{N}.json
 ```
 
 ## Input Format

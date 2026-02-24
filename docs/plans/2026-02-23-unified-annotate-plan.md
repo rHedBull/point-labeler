@@ -2,9 +2,15 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the separate labeler, doubles, and graph modules with a single unified `annotate/` module that handles all three annotation sub-stages.
+**Goal:** Replace the separate labeler, doubles, and graph modules with a single unified `annotate/` module that handles stages 2–4 (Label & Split, Instance Merge, Connection Graph).
 
-**Architecture:** Clean-room rewrite. New `annotate/` package with `server.py` (unified HTTP handler), `data.py` (pure data functions), and three HTML files (`viewer.html`, `splitter.html`, `graph_viewer.html`). Old modules deleted after validation. Server-side stage transitions with page reload.
+**Architecture:** Clean-room rewrite. New `annotate/` package with `server.py` (unified HTTP handler), `data.py` (pure data functions + versioning), and three HTML files (`viewer.html`, `splitter.html`, `graph_viewer.html`). Old modules deleted after validation. Server-side stage transitions with page reload.
+
+**Key design decisions (from review):**
+- Flat stage numbering 1–5 (no "sub-stages"): Segment, Label & Split, Instance Merge, Connection Graph, Equipment Description
+- Per-stage output versioning: new version only on finalize when input fingerprints differ from last version
+- Staleness warnings: downstream stages warn if their input fingerprints don't match latest upstream outputs
+- Graph export: `connectivity_graph.json` with only accepted edges + all nodes (including isolated). No action field. Review progress stays in `graph_session.json`.
 
 **Tech Stack:** Python stdlib `http.server`, numpy, Three.js (CDN), vanilla JS. No frameworks.
 
@@ -42,7 +48,7 @@
 
 ```python
 # annotate/server.py
-"""Unified HTTP server for the annotation tool (stages 2a, 2b, 2c)."""
+"""Unified HTTP server for the annotation tool (stages 2, 3, 4)."""
 ```
 
 **Step 2: Create test infrastructure**
@@ -608,9 +614,9 @@ git commit -m "feat(annotate): add split logic (get_split_data, apply_split)"
 
 ---
 
-### Task 5: `data.py` — export functions
+### Task 5: `data.py` — export functions with versioning
 
-Three export functions: patches (2a), instances (2b), graph (2c).
+Three export functions: patches (stage 2), instances (stage 3), graph (stage 4). All exports use per-stage versioning: a new version is created only when input fingerprints differ from the last finalized version.
 
 **Files:**
 - Modify: `src/industrial_point_labeler/annotate/data.py`
@@ -669,21 +675,35 @@ def test_export_instances(sample_cloud, tmp_path):
 def test_export_graph(tmp_path):
     edges = [
         {"source": 0, "target": 1, "min_dist": 0.05, "n_close_pairs": 10},
+        {"source": 1, "target": 2, "min_dist": 0.12, "n_close_pairs": 3},
+    ]
+    nodes = [
+        {"id": 0, "label": "pipe", "center": [0, 0, 0]},
+        {"id": 1, "label": "tank", "center": [5, 0, 0]},
+        {"id": 2, "label": "equipment", "center": [10, 0, 0]},
     ]
     session = {
-        "reviewed": [
+        "graph_reviewed": [
             {"source": 0, "target": 1, "action": "accept"},
+            {"source": 1, "target": 2, "action": "reject"},
         ],
     }
+    input_fingerprints = {"instance_ids.npy": "sha256:abc123"}
 
-    export_graph(edges, session, tmp_path, "abc123")
+    result = export_graph(edges, nodes, session, tmp_path, input_fingerprints)
 
-    assert (tmp_path / "reviewed_edges.json").exists()
+    assert (tmp_path / "connectivity_graph.v1.json").exists()
     import json
-    with open(tmp_path / "reviewed_edges.json") as f:
+    with open(tmp_path / "connectivity_graph.v1.json") as f:
         data = json.load(f)
-    assert data["summary"]["accepted"] == 1
-    assert data["labels_fingerprint"] == "abc123"
+    # Only accepted edges in output
+    assert len(data["edges"]) == 1
+    assert data["edges"][0]["source"] == 0
+    assert data["edges"][0]["target"] == 1
+    assert "action" not in data["edges"][0]
+    # All nodes present (including isolated node 2)
+    assert len(data["nodes"]) == 3
+    assert data["metadata"]["input_fingerprints"] == input_fingerprints
 ```
 
 **Step 2: Run to verify fail**
@@ -700,14 +720,41 @@ import json
 from pathlib import Path
 
 
-def export_patches(session, labels, point_indices_map, output_dir, class_map):
-    """Save patch-level outputs from sub-stage 2a.
+def _next_version(output_dir, prefix, input_fingerprints):
+    """Determine next version number. Returns (version, needs_new_version).
 
-    Writes patch_ids.npy, patch_classes.npy, patch_metadata.json.
+    If the latest version's metadata has matching input fingerprints,
+    returns (current_version, False) — overwrite in place.
+    Otherwise returns (current_version + 1, True) — create new version.
+    """
+    output_dir = Path(output_dir)
+    # Find latest version
+    existing = sorted(output_dir.glob(f"{prefix}_metadata.v*.json"))
+    if not existing:
+        return 1, True
+
+    latest = existing[-1]
+    # Extract version number
+    version = int(latest.stem.split(".v")[1])
+    with open(latest) as f:
+        meta = json.load(f)
+
+    if meta.get("input_fingerprints") == input_fingerprints:
+        return version, False  # same inputs, overwrite
+    return version + 1, True
+
+
+def export_patches(session, labels, point_indices_map, output_dir, class_map, input_fingerprints):
+    """Save patch-level outputs from stage 2.
+
+    Writes patch_ids.v{N}.npy, patch_classes.v{N}.npy, patch_metadata.v{N}.json.
+    New version only if input fingerprints differ from last version.
     Returns metadata dict.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    version, _ = _next_version(output_dir, "patch", input_fingerprints)
 
     N = len(labels)
     patch_ids = np.full(N, -1, dtype=np.int32)
@@ -723,10 +770,13 @@ def export_patches(session, labels, point_indices_map, output_dir, class_map):
                 patch_ids[idx] = gt_id
                 patch_classes[idx] = class_id
 
-    np.save(output_dir / "patch_ids.npy", patch_ids)
-    np.save(output_dir / "patch_classes.npy", patch_classes)
+    np.save(output_dir / f"patch_ids.v{version}.npy", patch_ids)
+    np.save(output_dir / f"patch_classes.v{version}.npy", patch_classes)
 
     meta = {
+        "version": version,
+        "input_fingerprints": input_fingerprints,
+        "created": datetime.datetime.now().isoformat(),
         "n_points": N,
         "n_patches": len(confirmed),
         "n_labeled_points": int((patch_ids >= 0).sum()),
@@ -745,20 +795,23 @@ def export_patches(session, labels, point_indices_map, output_dir, class_map):
             for s in confirmed
         ],
     }
-    with open(output_dir / "patch_metadata.json", "w") as f:
+    with open(output_dir / f"patch_metadata.v{version}.json", "w") as f:
         json.dump(meta, f, indent=2)
 
     return meta
 
 
-def export_instances(session, labels, point_indices_map, output_dir, class_map):
-    """Save instance-level outputs from sub-stage 2b.
+def export_instances(session, labels, point_indices_map, output_dir, class_map, input_fingerprints):
+    """Save instance-level outputs from stage 3.
 
-    Writes instance_ids.npy, instance_classes.npy, instance_metadata.json.
+    Writes instance_ids.v{N}.npy, instance_classes.v{N}.npy, instance_metadata.v{N}.json.
+    New version only if input fingerprints differ from last version.
     Returns metadata dict.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    version, _ = _next_version(output_dir, "instance", input_fingerprints)
 
     N = len(labels)
     instance_ids = np.full(N, -1, dtype=np.int32)
@@ -774,10 +827,13 @@ def export_instances(session, labels, point_indices_map, output_dir, class_map):
                 instance_ids[idx] = inst_id
                 instance_classes[idx] = class_id
 
-    np.save(output_dir / "instance_ids.npy", instance_ids)
-    np.save(output_dir / "instance_classes.npy", instance_classes)
+    np.save(output_dir / f"instance_ids.v{version}.npy", instance_ids)
+    np.save(output_dir / f"instance_classes.v{version}.npy", instance_classes)
 
     meta = {
+        "version": version,
+        "input_fingerprints": input_fingerprints,
+        "created": datetime.datetime.now().isoformat(),
         "n_points": N,
         "n_instances": len(instances),
         "n_labeled_points": int((instance_ids >= 0).sum()),
@@ -796,63 +852,65 @@ def export_instances(session, labels, point_indices_map, output_dir, class_map):
             for inst in instances
         ],
     }
-    with open(output_dir / "instance_metadata.json", "w") as f:
+    with open(output_dir / f"instance_metadata.v{version}.json", "w") as f:
         json.dump(meta, f, indent=2)
 
     return meta
 
 
-def export_graph(edges, session, output_dir, labels_fingerprint):
-    """Save reviewed connectivity graph from sub-stage 2c.
+def export_graph(edges, nodes, session, output_dir, input_fingerprints):
+    """Save connectivity graph from stage 4.
 
-    Writes reviewed_edges.json.
+    Writes connectivity_graph.v{N}.json containing only accepted edges
+    and all nodes (including isolated ones with no connections).
+    Review progress stays in graph_session.json.
+    New version only if input fingerprints differ from last version.
     """
-    import datetime
-
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    reviewed = session.get("reviewed", [])
+    version, _ = _next_version(output_dir, "connectivity_graph", input_fingerprints)
+
+    reviewed = session.get("graph_reviewed", [])
     reviewed_map = {(r["source"], r["target"]): r["action"] for r in reviewed}
 
-    export_edges = []
-    for i, edge in enumerate(edges):
+    # Only accepted edges — no action field
+    accepted_edges = []
+    for edge in edges:
         key = (edge["source"], edge["target"])
         action = reviewed_map.get(key, "pending")
+        if action != "accept":
+            continue
         entry = {
-            "edge_id": i,
             "source": edge["source"],
             "target": edge["target"],
             "min_dist": edge["min_dist"],
             "n_close_pairs": edge["n_close_pairs"],
-            "action": action,
         }
         if "endpoint" in edge:
             entry["endpoint"] = edge["endpoint"]
+        if "endpoint_target" in edge:
+            entry["endpoint_target"] = edge["endpoint_target"]
         if "connection_type" in edge:
             entry["connection_type"] = edge["connection_type"]
-        export_edges.append(entry)
-
-    n_accepted = sum(1 for e in export_edges if e["action"] == "accept")
-    n_rejected = sum(1 for e in export_edges if e["action"] == "reject")
-    n_pending = sum(1 for e in export_edges if e["action"] == "pending")
+        accepted_edges.append(entry)
 
     output = {
-        "edges": export_edges,
-        "summary": {
-            "total": len(export_edges),
-            "accepted": n_accepted,
-            "rejected": n_rejected,
-            "pending": n_pending,
+        "nodes": nodes,
+        "edges": accepted_edges,
+        "metadata": {
+            "version": version,
+            "input_fingerprints": input_fingerprints,
+            "created": datetime.datetime.now().isoformat(),
+            "n_nodes": len(nodes),
+            "n_edges": len(accepted_edges),
         },
-        "exported": datetime.datetime.now().isoformat(),
-        "labels_fingerprint": labels_fingerprint,
     }
 
-    with open(output_dir / "reviewed_edges.json", "w") as f:
+    with open(output_dir / f"connectivity_graph.v{version}.json", "w") as f:
         json.dump(output, f, indent=2)
 
-    return output["summary"]
+    return output["metadata"]
 ```
 
 **Step 4: Run tests**
@@ -882,7 +940,7 @@ Reference: `labeler/server.py:172-298` for handler pattern, `graph/server.py:98-
 
 ```python
 # annotate/server.py
-"""Unified HTTP server for the annotation tool (stages 2a, 2b, 2c)."""
+"""Unified HTTP server for the annotation tool (stages 2, 3, 4)."""
 
 import datetime
 import json
@@ -1200,12 +1258,16 @@ Replace stubs. These call into `data.py` functions.
     def _handle_finalize_patches(self):
         from industrial_point_labeler.annotate.data import export_patches
 
+        input_fingerprints = {
+            "instance_labels.npy": self.app["labels_fingerprint"],
+        }
         meta = export_patches(
             self.app["session"],
             self.app["labels"],
             self.app["point_indices_map"],
             self.app["output_dir"],
             self.app["class_map"],
+            input_fingerprints,
         )
 
         # Advance stage
@@ -1223,6 +1285,15 @@ Replace stubs. These call into `data.py` functions.
 
     def _handle_finalize_instances(self):
         from industrial_point_labeler.annotate.data import export_instances
+        from industrial_point_labeler.io import labels_fingerprint as compute_fp
+
+        # Compute fingerprints of stage 2 outputs (current patches)
+        output_dir = self.app["output_dir"]
+        input_fingerprints = {}
+        for prefix in ("patch_ids", "patch_classes"):
+            latest = sorted(output_dir.glob(f"{prefix}.v*.npy"))
+            if latest:
+                input_fingerprints[latest[-1].name] = compute_fp(np.load(latest[-1]))
 
         meta = export_instances(
             self.app["session"],
@@ -1230,6 +1301,7 @@ Replace stubs. These call into `data.py` functions.
             self.app["point_indices_map"],
             self.app["output_dir"],
             self.app["class_map"],
+            input_fingerprints,
         )
 
         # Auto-run graph builder
@@ -1395,16 +1467,31 @@ Replace the stubs:
 
     def _handle_export_graph(self):
         from industrial_point_labeler.annotate.data import export_graph
+        from industrial_point_labeler.io import labels_fingerprint as compute_fp
 
-        summary = export_graph(
+        # Compute fingerprints of stage 3 outputs (current instances)
+        output_dir = self.app["output_dir"]
+        input_fingerprints = {}
+        for prefix in ("instance_ids", "instance_classes"):
+            latest = sorted(output_dir.glob(f"{prefix}.v*.npy"))
+            if latest:
+                input_fingerprints[latest[-1].name] = compute_fp(np.load(latest[-1]))
+
+        # Get graph nodes from app state
+        graph_path = output_dir / "adjacency_graph.json"
+        with open(graph_path) as f:
+            graph = json.load(f)
+
+        metadata = export_graph(
             self.app["edges"],
+            graph["nodes"],
             self.app["session"],
             self.app["output_dir"],
-            self.app["labels_fingerprint"],
+            input_fingerprints,
         )
-        self._send_json(200, {"ok": True, "summary": summary})
-        print(f"  Exported graph: {summary['accepted']} accepted, "
-              f"{summary['rejected']} rejected, {summary['pending']} pending")
+        self._send_json(200, {"ok": True, "metadata": metadata})
+        print(f"  Exported connectivity graph: {metadata['n_nodes']} nodes, "
+              f"{metadata['n_edges']} accepted edges (v{metadata['version']})")
 ```
 
 **Step 2: Verify it parses**
@@ -1590,13 +1677,23 @@ def main():
         "next_segment_id": next_segment_id,
     }
 
+    # Staleness checks on resume
+    if stage in ("instance", "graph"):
+        _check_staleness(output_dir, stage)
+
     # If resuming at graph stage, load graph data
     if stage == "graph":
         graph_path = output_dir / "adjacency_graph.json"
         if graph_path.exists():
             with open(graph_path) as f:
                 graph = json.load(f)
-            instance_labels = np.load(output_dir / "instance_ids.npy")
+            # Load latest versioned instance labels
+            latest_instance = sorted(output_dir.glob("instance_ids.v*.npy"))
+            if not latest_instance:
+                print("  ERROR: no instance_ids.v*.npy found for graph stage")
+                sys.exit(1)
+            instance_labels = np.load(latest_instance[-1])
+            print(f"  Using {latest_instance[-1].name}")
             graph_segs, graph_ctx, gc, ge = prepare_graph_segments(
                 xyz, rgb, instance_labels, graph["nodes"],
             )
@@ -1651,7 +1748,7 @@ git commit -m "feat(annotate): implement main() with startup and stage resumptio
 
 ### Task 11: `viewer.html` — label and instance merge stages
 
-Port from `labeler/viewer.html` (1302 lines). Write a single HTML file that handles both 2a (label+split) and 2b (instance merge) stages. The `stage` field from `/data` response controls which UI elements are visible.
+Port from `labeler/viewer.html` (1302 lines). Write a single HTML file that handles both stage 2 (label+split) and stage 3 (instance merge). The `stage` field from `/data` response controls which UI elements are visible.
 
 **Files:**
 - Create: `src/industrial_point_labeler/annotate/viewer.html`
@@ -1668,11 +1765,11 @@ Copy `labeler/viewer.html` as the starting point. Then make these modifications:
    ```
 
 3. **Add stage-conditional toolbar controls:**
-   - If `stage === 'label'`: show "Split Selected" button, "Refresh" button, "Finalize Patches" button
-   - If `stage === 'instance'`: show "Finalize Instances" button
+   - If `stage === 'label'` (stage 2): show "Split Selected" button, "Refresh" button, "Finalize Patches" button
+   - If `stage === 'instance'` (stage 3): show "Finalize Instances" button
    - Both stages share the rest of the toolbar (color toggle, point size, export)
 
-4. **"Split Selected" button** (2a only):
+4. **"Split Selected" button** (stage 2 only):
    ```javascript
    function splitSelected() {
        const ids = Array.from(selectedSegments).join(',');
@@ -1681,9 +1778,9 @@ Copy `labeler/viewer.html` as the starting point. Then make these modifications:
    }
    ```
 
-5. **"Refresh" button** (2a only): re-fetches `/data` and rebuilds the scene.
+5. **"Refresh" button** (stage 2 only): re-fetches `/data` and rebuilds the scene.
 
-6. **"Finalize Patches" button** (2a only):
+6. **"Finalize Patches" button** (stage 2 only):
    ```javascript
    async function finalizePatches() {
        if (!confirm('Finalize patches? This advances to instance merge stage.')) return;
@@ -1693,7 +1790,7 @@ Copy `labeler/viewer.html` as the starting point. Then make these modifications:
    }
    ```
 
-7. **"Finalize Instances" button** (2b only):
+7. **"Finalize Instances" button** (stage 3 only):
    ```javascript
    async function finalizeInstances() {
        if (!confirm('Finalize instances? This builds the graph and advances to graph review.')) return;
@@ -1703,9 +1800,9 @@ Copy `labeler/viewer.html` as the starting point. Then make these modifications:
    }
    ```
 
-8. **Sidebar for 2b**: when `stage === 'instance'`, group the sidebar segments by class instead of showing raw segment list. The confirmed patches become the selectable units.
+8. **Sidebar for stage 3**: when `stage === 'instance'`, group the sidebar segments by class instead of showing raw segment list. The confirmed patches become the selectable units.
 
-9. **Same-class enforcement in 2b**: when confirming a merge in instance stage, check all selected patches share the same class. If not, show an alert.
+9. **Same-class enforcement in stage 3**: when confirming a merge in instance stage, check all selected patches share the same class. If not, show an alert.
 
 **Step 2: Verify by running the server**
 
@@ -2001,7 +2098,11 @@ Run through the full pipeline with real data to verify everything works.
    - Add manual edge with Ctrl+Click
    - Export graph
 5. Verify output files exist in `annotation/`:
-   - `patch_ids.npy`, `patch_classes.npy`, `patch_metadata.json`
-   - `instance_ids.npy`, `instance_classes.npy`, `instance_metadata.json`
-   - `adjacency_graph.json`, `reviewed_edges.json`
+   - `patch_ids.v1.npy`, `patch_classes.v1.npy`, `patch_metadata.v1.json`
+   - `instance_ids.v1.npy`, `instance_classes.v1.npy`, `instance_metadata.v1.json`
+   - `adjacency_graph.json`, `connectivity_graph.v1.json`
+   - Verify metadata files contain `input_fingerprints` and `version` fields
+   - Verify `connectivity_graph.v1.json` contains only accepted edges + all nodes
 6. Stop server, restart → verify it resumes at the correct stage
+7. Re-do stage 2 with same inputs → verify no version bump (still v1)
+8. Modify inputs and re-do → verify v2 created and staleness warning shown for downstream stages
