@@ -273,8 +273,22 @@ class AnnotateHandler(SimpleHTTPRequestHandler):
             if latest:
                 input_fingerprints[latest[-1].name] = labels_fingerprint(np.load(latest[-1]))
 
+        # Transform confirmed list into instances format for export.
+        # The viewer uses the same confirmed[] structure for both stages;
+        # export_instances expects session["instances"] with instance_id/patch_ids.
+        session = self.app["session"]
+        if "instances" not in session:
+            session["instances"] = [
+                {
+                    "instance_id": gt["gt_id"],
+                    "label": gt["label"],
+                    "patch_ids": gt["source_segment_ids"],
+                }
+                for gt in session.get("confirmed", [])
+            ]
+
         meta = export_instances(
-            self.app["session"],
+            session,
             self.app["labels"],
             self.app["point_indices_map"],
             self.app["output_dir"],
