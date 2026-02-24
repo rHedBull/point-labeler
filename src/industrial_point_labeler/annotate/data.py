@@ -419,7 +419,17 @@ def export_graph(edges, nodes, session, output_dir, input_fingerprints):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    version, _ = _next_version(output_dir, "connectivity_graph", input_fingerprints)
+    # Graph has no separate _metadata file — version info is embedded in the JSON
+    existing = sorted(output_dir.glob("connectivity_graph.v*.json"))
+    if not existing:
+        version = 1
+    else:
+        latest = existing[-1]
+        version = int(latest.stem.split(".v")[1])
+        with open(latest) as f:
+            meta = json.load(f).get("metadata", {})
+        if meta.get("input_fingerprints") != input_fingerprints:
+            version += 1  # different inputs → new version
 
     reviewed = session.get("graph_reviewed", [])
     reviewed_map = {(r["source"], r["target"]): r["action"] for r in reviewed}
