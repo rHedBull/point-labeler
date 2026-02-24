@@ -7,13 +7,9 @@ Add `project.yaml`-based pipeline control so users can run `ipl segment my-site/
 ## Stage Dependency Graph
 
 ```
-segment ──► label ──► doubles (optional)
-              │
-              ├──► build-graph ──► review-graph
-              │         │
-              │         └──► describe-equipment
-              │
-              └──► describe-equipment (also needs build-graph)
+segment ──► annotate (label → instance → graph)
+                │
+                └──► describe-equipment
 ```
 
 ## Stage I/O Wiring (project mode)
@@ -21,11 +17,8 @@ segment ──► label ──► doubles (optional)
 | Stage | Reads from | Writes to |
 |-------|-----------|-----------|
 | segment | `scan.ply` (project root) | `segmentation/` |
-| label | `scan.ply`, `segmentation/instance_labels.npy`, `segmentation/ransac_summary.json` | `annotation/` |
-| doubles | `doubles/` (pre-staged PLY files) | `doubles/splits.json` |
-| build-graph | `scan.ply`, `annotation/gt_labels.npy`, `annotation/gt_metadata.json` | `graph/adjacency_graph.json` |
-| review-graph | `scan.ply`, `annotation/gt_labels.npy`, `graph/adjacency_graph.json` | `graph/` |
-| describe-equipment | `scan.ply`, `annotation/gt_labels.npy`, `segmentation/ransac_summary.json`, `graph/adjacency_graph.json` | `equipment/` |
+| annotate | `scan.ply`, `segmentation/instance_labels.npy`, `segmentation/ransac_summary.json` | `annotation/` |
+| describe-equipment | `scan.ply`, `annotation/instance_ids.npy`, `annotation/connectivity_graph.json`, `segmentation/ransac_summary.json` | `equipment/` |
 
 All paths relative to the project directory (where `project.yaml` lives).
 
@@ -67,7 +60,7 @@ Actions:
 3. Same for `--mesh`
 4. Copy `config/classes.yaml` from the installed package → `<directory>/classes.yaml`
 5. Write `project.yaml` with points, mesh, config fields + null stages
-6. Create subdirectories: segmentation/, annotation/, doubles/, graph/, equipment/
+6. Create subdirectories: segmentation/, annotation/, equipment/
 
 ---
 
@@ -83,17 +76,16 @@ Output format:
 ```
 my-site/ pipeline status:
 
-  ✓ segment            1,248 instances (2026-02-23 14:30)
-  ✓ label              87 GT segments (2026-02-23 15:45)
-  · doubles            skipped
-  ✗ build-graph        not started (requires: label ✓)
-  ✗ review-graph       not started (requires: build-graph ✗)
-  ✗ describe-equipment not started (requires: build-graph ✗)
+  ✓ segment              1,248 instances (2026-02-23 14:30)
+  ✓ annotate (label)     87 patches (2026-02-23 15:45)
+  ✓ annotate (instance)  42 instances (2026-02-23 16:30)
+  ✓ annotate (graph)     38 edges exported (2026-02-23 17:00)
+  ✗ describe-equipment   not started (requires: annotate ✓)
 ```
 
 ---
 
-## Tasks 4-8: Wire each stage to project mode
+## Tasks 4-6: Wire each stage to project mode
 
 Each stage's `main()` gets the same pattern:
 
@@ -114,64 +106,37 @@ input_path  = resolve_points(project_dir, cfg)
 output_path = stage_dir(project_dir, "segment")    # → segmentation/
 ```
 
-**Task 5 — `label`:**
+**Task 5 — `annotate`:**
 ```python
-points_path = resolve_points(project_dir, cfg)
-labels_path = project_dir / "segmentation" / "instance_labels.npy"
+points_path  = resolve_points(project_dir, cfg)
+labels_path  = project_dir / "segmentation" / "instance_labels.npy"
 summary_path = project_dir / "segmentation" / "ransac_summary.json"
-resume_path  = project_dir / "annotation" / "gt_session.json"  # auto-resume if exists
 mesh_path    = resolve_mesh(project_dir, cfg)
 config_path  = resolve_config(project_dir, cfg)
 output_dir   = project_dir / "annotation"
 ```
 
-Stamp on each save (pass project info through `app_state`).
+Resumes at the saved stage (label/instance/graph) from `gt_session.json`.
 
-**Task 6 — `doubles`:**
-```python
-data_dir = project_dir / "doubles"
-```
-
-**Task 7 — `build-graph`:**
+**Task 6 — `describe-equipment`:**
 ```python
 points_path  = resolve_points(project_dir, cfg)
-labels_path  = project_dir / "annotation" / "gt_labels.npy"
-metadata_path = project_dir / "annotation" / "gt_metadata.json"
-output_path  = project_dir / "graph" / "adjacency_graph.json"
-config_path  = resolve_config(project_dir, cfg)
-```
-
-**Task 7 — `review-graph`:**
-```python
-points_path = resolve_points(project_dir, cfg)
-labels_path = project_dir / "annotation" / "gt_labels.npy"
-graph_path  = project_dir / "graph" / "adjacency_graph.json"
-mesh_path   = resolve_mesh(project_dir, cfg)
-output_dir  = project_dir / "graph"
-resume      = (output_dir / "graph_session.json").exists()  # auto-resume
-```
-
-**Task 8 — `describe-equipment`:**
-```python
-points_path  = resolve_points(project_dir, cfg)
-labels_path  = project_dir / "annotation" / "gt_labels.npy"
+labels_path  = project_dir / "annotation" / "instance_ids.v{N}.npy"
 summary_path = project_dir / "segmentation" / "ransac_summary.json"
-graph_path   = project_dir / "graph" / "adjacency_graph.json"
+graph_path   = project_dir / "annotation" / "connectivity_graph.v{N}.json"
 mesh_path    = resolve_mesh(project_dir, cfg)
-output_dir   = project_dir / "equipment"  # normalized (was: summary.parent)
+output_dir   = project_dir / "equipment"
 ```
 
 ---
 
-## Task 9: Update README
+## Task 7: Update README
 
 Add "Project Workflow" section:
 ```bash
 ipl init my-site/ --points scan.ply --mesh mesh.glb
 ipl segment my-site/
-ipl label my-site/
-ipl build-graph my-site/
-ipl review-graph my-site/
+ipl annotate my-site/
 ipl describe-equipment my-site/
 ipl status my-site/
 ```
@@ -184,6 +149,6 @@ Keep current explicit-args usage as "Advanced Usage".
 
 1. `ipl init test-project/ --points /path/to/any.ply` → creates project.yaml, classes.yaml, subdirs
 2. `ipl status test-project/` → all stages "not started"
-3. `ipl label test-project/` → error: "Stage 'segment' not complete. Run: ipl segment test-project/"
+3. `ipl annotate test-project/` → error: "Stage 'segment' not complete. Run: ipl segment test-project/"
 4. `ipl segment --input scan.ply --output out/` → legacy mode still works
 5. `ipl <cmd> --help` → all commands print help
