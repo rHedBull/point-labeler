@@ -1329,6 +1329,7 @@ async function refreshData() {
 
 async function finalizePatches() {
     if (!confirm('Finalize patches? This advances to instance merge stage.')) return;
+    await fetch('/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(session)});
     const resp = await fetch('/finalize-patches', {method: 'POST'});
     const data = await resp.json();
     if (data.ok) location.reload();
@@ -1336,6 +1337,7 @@ async function finalizePatches() {
 
 async function finalizeInstances() {
     if (!confirm('Finalize instances? This builds the graph and advances to graph review.')) return;
+    await fetch('/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(session)});
     const resp = await fetch('/finalize-instances', {method: 'POST'});
     const data = await resp.json();
     if (data.ok) location.reload();
