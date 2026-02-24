@@ -26,7 +26,7 @@ All paths relative to the project directory (where `project.yaml` lives).
 
 ## Task 1: Add `project.py`
 
-**Create:** `src/industrial_point_labeler/project.py`
+**Create:** `industrial_point_labeler/project.py`
 
 Constants:
 - `STAGE_ORDER` — ordered list of stage names
@@ -48,7 +48,7 @@ Functions:
 
 ## Task 2: Add `ipl init`
 
-**Modify:** `src/industrial_point_labeler/cli.py`
+**Modify:** `industrial_point_labeler/cli.py`
 
 ```
 ipl init <directory> --points <path> [--mesh <path>]
@@ -66,7 +66,7 @@ Actions:
 
 ## Task 3: Add `ipl status`
 
-**Modify:** `src/industrial_point_labeler/cli.py`
+**Modify:** `industrial_point_labeler/cli.py`
 
 ```
 ipl status [<directory>]

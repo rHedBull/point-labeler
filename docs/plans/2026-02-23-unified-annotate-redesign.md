@@ -15,7 +15,7 @@
 ## File Structure
 
 ```
-src/industrial_point_labeler/
+industrial_point_labeler/
 ├── annotate/
 │   ├── __init__.py
 │   ├── server.py          # Unified HTTP server, all routes

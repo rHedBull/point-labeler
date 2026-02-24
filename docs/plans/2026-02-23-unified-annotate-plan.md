@@ -16,22 +16,22 @@
 
 **Reference files:**
 - Design doc: `docs/plans/2026-02-23-unified-annotate-redesign.md`
-- Old labeler server: `src/industrial_point_labeler/labeler/server.py` (457 lines)
-- Old doubles server: `src/industrial_point_labeler/doubles/server.py` (87 lines)
-- Old graph server: `src/industrial_point_labeler/graph/server.py` (425 lines)
-- Old graph builder: `src/industrial_point_labeler/graph/builder.py` (217 lines)
-- Old labeler viewer: `src/industrial_point_labeler/labeler/viewer.html` (1302 lines)
-- Old doubles viewer: `src/industrial_point_labeler/doubles/viewer.html` (908 lines)
-- Old graph viewer: `src/industrial_point_labeler/graph/viewer.html` (1806 lines)
+- Old labeler server: `industrial_point_labeler/labeler/server.py` (457 lines)
+- Old doubles server: `industrial_point_labeler/doubles/server.py` (87 lines)
+- Old graph server: `industrial_point_labeler/graph/server.py` (425 lines)
+- Old graph builder: `industrial_point_labeler/graph/builder.py` (217 lines)
+- Old labeler viewer: `industrial_point_labeler/labeler/viewer.html` (1302 lines)
+- Old doubles viewer: `industrial_point_labeler/doubles/viewer.html` (908 lines)
+- Old graph viewer: `industrial_point_labeler/graph/viewer.html` (1806 lines)
 
 ---
 
 ### Task 1: Scaffold annotate module + test infrastructure
 
 **Files:**
-- Create: `src/industrial_point_labeler/annotate/__init__.py`
-- Create: `src/industrial_point_labeler/annotate/data.py` (empty)
-- Create: `src/industrial_point_labeler/annotate/server.py` (empty)
+- Create: `industrial_point_labeler/annotate/__init__.py`
+- Create: `industrial_point_labeler/annotate/data.py` (empty)
+- Create: `industrial_point_labeler/annotate/server.py` (empty)
 - Create: `tests/conftest.py`
 - Create: `tests/test_data.py` (empty)
 
@@ -101,7 +101,7 @@ Expected: collects 0 tests, no import errors
 **Step 4: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/ tests/
+git add industrial_point_labeler/annotate/ tests/
 git commit -m "scaffold: annotate module and test infrastructure"
 ```
 
@@ -112,7 +112,7 @@ git commit -m "scaffold: annotate module and test infrastructure"
 Port `prepare_segments` from `labeler/server.py:30-123` and `prepare_graph_segments` from `graph/server.py:28-95`. Extract as pure functions.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/data.py`
+- Modify: `industrial_point_labeler/annotate/data.py`
 - Modify: `tests/test_data.py`
 
 **Step 1: Write tests for prepare_segments**
@@ -298,7 +298,7 @@ Expected: all 5 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/data.py tests/test_data.py
+git add industrial_point_labeler/annotate/data.py tests/test_data.py
 git commit -m "feat(annotate): add prepare_segments to data layer"
 ```
 
@@ -309,7 +309,7 @@ git commit -m "feat(annotate): add prepare_segments to data layer"
 Port from `graph/server.py:28-95`. Builds segment data for process-class nodes only.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/data.py`
+- Modify: `industrial_point_labeler/annotate/data.py`
 - Modify: `tests/test_data.py`
 
 **Step 1: Write tests**
@@ -421,7 +421,7 @@ Expected: all 6 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/data.py tests/test_data.py
+git add industrial_point_labeler/annotate/data.py tests/test_data.py
 git commit -m "feat(annotate): add prepare_graph_segments"
 ```
 
@@ -432,7 +432,7 @@ git commit -m "feat(annotate): add prepare_graph_segments"
 New functions: `get_split_data` and `apply_split`. These don't exist in old code — the old doubles tool used local PLY files.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/data.py`
+- Modify: `industrial_point_labeler/annotate/data.py`
 - Modify: `tests/test_data.py`
 
 **Step 1: Write tests**
@@ -608,7 +608,7 @@ Expected: all 9 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/data.py tests/test_data.py
+git add industrial_point_labeler/annotate/data.py tests/test_data.py
 git commit -m "feat(annotate): add split logic (get_split_data, apply_split)"
 ```
 
@@ -619,7 +619,7 @@ git commit -m "feat(annotate): add split logic (get_split_data, apply_split)"
 Three export functions: patches (stage 2), instances (stage 3), graph (stage 4). All exports use per-stage versioning: a new version is created only when input fingerprints differ from the last finalized version.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/data.py`
+- Modify: `industrial_point_labeler/annotate/data.py`
 - Modify: `tests/test_data.py`
 
 **Step 1: Write tests**
@@ -921,7 +921,7 @@ Expected: all 12 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/data.py tests/test_data.py
+git add industrial_point_labeler/annotate/data.py tests/test_data.py
 git commit -m "feat(annotate): add export functions (patches, instances, graph)"
 ```
 
@@ -932,7 +932,7 @@ git commit -m "feat(annotate): add export functions (patches, instances, graph)"
 Write the `AnnotateHandler` class with stage-aware `do_GET`/`do_POST` routing and the shared utility methods (serve HTML, serve JSON, read POST body).
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/server.py`
+- Modify: `industrial_point_labeler/annotate/server.py`
 
 **Step 1: Implement the handler skeleton**
 
@@ -1105,7 +1105,7 @@ Expected: `OK`
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/server.py
+git add industrial_point_labeler/annotate/server.py
 git commit -m "feat(annotate): add handler skeleton with stage-aware routing"
 ```
 
@@ -1116,7 +1116,7 @@ git commit -m "feat(annotate): add handler skeleton with stage-aware routing"
 Implement the two routes that work across all stages.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/server.py`
+- Modify: `industrial_point_labeler/annotate/server.py`
 
 **Step 1: Implement _serve_data**
 
@@ -1180,7 +1180,7 @@ Expected: `OK`
 **Step 4: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/server.py
+git add industrial_point_labeler/annotate/server.py
 git commit -m "feat(annotate): implement /data and /save handlers"
 ```
 
@@ -1191,7 +1191,7 @@ git commit -m "feat(annotate): implement /data and /save handlers"
 Implement `/split-data`, `/apply-split`, `/finalize-patches`, `/finalize-instances`.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/server.py`
+- Modify: `industrial_point_labeler/annotate/server.py`
 
 **Step 1: Implement split handlers**
 
@@ -1366,7 +1366,7 @@ Expected: `OK`
 **Step 4: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/server.py
+git add industrial_point_labeler/annotate/server.py
 git commit -m "feat(annotate): implement split and finalize handlers"
 ```
 
@@ -1377,7 +1377,7 @@ git commit -m "feat(annotate): implement split and finalize handlers"
 Implement `/graph-data`, `/add-edge`, `/review-edge`, `/export-graph`.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/server.py`
+- Modify: `industrial_point_labeler/annotate/server.py`
 
 **Step 1: Implement graph route handlers**
 
@@ -1502,7 +1502,7 @@ Expected: `OK`
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/server.py
+git add industrial_point_labeler/annotate/server.py
 git commit -m "feat(annotate): implement graph route handlers"
 ```
 
@@ -1513,7 +1513,7 @@ git commit -m "feat(annotate): implement graph route handlers"
 Write the `main()` function that loads data, resumes at the correct stage, and starts the server.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/annotate/server.py`
+- Modify: `industrial_point_labeler/annotate/server.py`
 
 **Step 1: Implement main()**
 
@@ -1740,7 +1740,7 @@ Expected: prints argparse help with `project_dir`, `--points`, `--labels`, etc.
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/server.py
+git add industrial_point_labeler/annotate/server.py
 git commit -m "feat(annotate): implement main() with startup and stage resumption"
 ```
 
@@ -1751,7 +1751,7 @@ git commit -m "feat(annotate): implement main() with startup and stage resumptio
 Port from `labeler/viewer.html` (1302 lines). Write a single HTML file that handles both stage 2 (label+split) and stage 3 (instance merge). The `stage` field from `/data` response controls which UI elements are visible.
 
 **Files:**
-- Create: `src/industrial_point_labeler/annotate/viewer.html`
+- Create: `industrial_point_labeler/annotate/viewer.html`
 
 **Step 1: Port the labeler viewer**
 
@@ -1814,7 +1814,7 @@ Open browser, verify:
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/viewer.html
+git add industrial_point_labeler/annotate/viewer.html
 git commit -m "feat(annotate): add viewer.html for label and instance stages"
 ```
 
@@ -1825,7 +1825,7 @@ git commit -m "feat(annotate): add viewer.html for label and instance stages"
 Port from `doubles/viewer.html` (908 lines). Re-wire data source from local PLY files to the annotation server.
 
 **Files:**
-- Create: `src/industrial_point_labeler/annotate/splitter.html`
+- Create: `industrial_point_labeler/annotate/splitter.html`
 
 **Step 1: Port the doubles viewer**
 
@@ -1873,7 +1873,7 @@ Run the annotation server, select segments, click "Split Selected", verify the s
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/splitter.html
+git add industrial_point_labeler/annotate/splitter.html
 git commit -m "feat(annotate): add splitter.html (OBB split tool)"
 ```
 
@@ -1884,7 +1884,7 @@ git commit -m "feat(annotate): add splitter.html (OBB split tool)"
 Port from `graph/viewer.html` (1806 lines). Minimal changes — mostly route URLs.
 
 **Files:**
-- Create: `src/industrial_point_labeler/annotate/graph_viewer.html`
+- Create: `industrial_point_labeler/annotate/graph_viewer.html`
 
 **Step 1: Port the graph viewer**
 
@@ -1924,7 +1924,7 @@ Run the server with a session at "graph" stage, verify the split-view loads, edg
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/annotate/graph_viewer.html
+git add industrial_point_labeler/annotate/graph_viewer.html
 git commit -m "feat(annotate): add graph_viewer.html for connection graph review"
 ```
 
@@ -1935,7 +1935,7 @@ git commit -m "feat(annotate): add graph_viewer.html for connection graph review
 Replace old commands with `annotate`.
 
 **Files:**
-- Modify: `src/industrial_point_labeler/cli.py`
+- Modify: `industrial_point_labeler/cli.py`
 
 **Step 1: Update command map**
 
@@ -1991,7 +1991,7 @@ Expected: shows annotation tool argparse help
 **Step 3: Commit**
 
 ```bash
-git add src/industrial_point_labeler/cli.py
+git add industrial_point_labeler/cli.py
 git commit -m "feat(cli): replace old commands with unified annotate"
 ```
 
@@ -2043,11 +2043,11 @@ git commit -m "config: remove double class (splitting is now inline in annotate)
 Remove `labeler/`, `doubles/`, `graph/server.py`, `graph/viewer.html`, `graph/__init__.py`. Keep `graph/builder.py`.
 
 **Files:**
-- Delete: `src/industrial_point_labeler/labeler/` (entire directory)
-- Delete: `src/industrial_point_labeler/doubles/` (entire directory)
-- Delete: `src/industrial_point_labeler/graph/server.py`
-- Delete: `src/industrial_point_labeler/graph/viewer.html`
-- Delete: `src/industrial_point_labeler/graph/__init__.py`
+- Delete: `industrial_point_labeler/labeler/` (entire directory)
+- Delete: `industrial_point_labeler/doubles/` (entire directory)
+- Delete: `industrial_point_labeler/graph/server.py`
+- Delete: `industrial_point_labeler/graph/viewer.html`
+- Delete: `industrial_point_labeler/graph/__init__.py`
 
 **Step 1: Verify new module works first**
 
@@ -2057,11 +2057,11 @@ Verify all three stages work end-to-end in the browser.
 **Step 2: Delete old files**
 
 ```bash
-rm -rf src/industrial_point_labeler/labeler/
-rm -rf src/industrial_point_labeler/doubles/
-rm src/industrial_point_labeler/graph/server.py
-rm src/industrial_point_labeler/graph/viewer.html
-rm src/industrial_point_labeler/graph/__init__.py
+rm -rf industrial_point_labeler/labeler/
+rm -rf industrial_point_labeler/doubles/
+rm industrial_point_labeler/graph/server.py
+rm industrial_point_labeler/graph/viewer.html
+rm industrial_point_labeler/graph/__init__.py
 ```
 
 **Step 3: Verify nothing imports the old modules**

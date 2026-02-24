@@ -21,4 +21,4 @@ segmentation = ["open3d>=0.17", "scikit-learn>=1.2"]
 ipl = "industrial_point_labeler.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/industrial_point_labeler"]
+packages = ["industrial_point_labeler"]
