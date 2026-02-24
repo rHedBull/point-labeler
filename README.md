@@ -5,22 +5,22 @@ Interactive segmentation and annotation toolkit for industrial LiDAR point cloud
 ## Install
 
 ```bash
-pip install -e .
+# Recommended (using uv):
+uv pip install -e ".[segmentation]"
 
-# With RANSAC segmentation support (requires Open3D):
+# Or with pip:
 pip install -e ".[segmentation]"
 ```
+
+The `segmentation` extra pulls in Open3D and scikit-learn for RANSAC primitive fitting.
 
 ## Pipeline
 
 | Stage | Command | Description |
 |-------|---------|-------------|
 | 1 | `ipl segment` | RANSAC primitive fitting (planes, cylinders, spheres) |
-| 2 | `ipl label` | Interactive merge-based GT annotation |
-| 3 | `ipl doubles` | Dissect overlapping/double-scanned segments |
-| 4a | `ipl build-graph` | Build pipe-endpoint connectivity graph |
-| 4b | `ipl review-graph` | Interactive graph edge review |
-| 5 | `ipl describe-equipment` | Annotate equipment segments with descriptions |
+| 2 | `ipl annotate` | Unified interactive annotation (label, split, instance export, graph review) |
+| 3 | `ipl describe-equipment` | Annotate equipment segments with descriptions |
 
 ## Quick Start
 
@@ -28,13 +28,20 @@ pip install -e ".[segmentation]"
 # 1. Segment a point cloud
 ipl segment --input scan.ply --output output/
 
-# 2. Label the segments interactively
-ipl label --points scan.ply --labels output/instance_labels.npy --output-dir gt/
+# 2. Annotate interactively (opens browser at localhost:8766)
+ipl annotate --points scan.ply --labels output/instance_labels.npy
 
-# 3. Build and review connectivity graph
-ipl build-graph --points scan.ply --labels gt/gt_labels.npy \
-    --metadata gt/gt_metadata.json --output gt/graph.json
-ipl review-graph --points scan.ply --labels gt/gt_labels.npy --graph gt/graph.json
+# With optional RANSAC summary and custom output directory:
+ipl annotate --points scan.ply --labels output/instance_labels.npy \
+    --summary output/ransac_summary.json --output-dir annotation/
+
+# Resume a previous session:
+ipl annotate --points scan.ply --labels output/instance_labels.npy \
+    --resume annotation/gt_session.json
+
+# 3. Describe equipment (after annotation is finalized)
+ipl describe-equipment --points scan.ply --labels annotation/gt_labels.npy \
+    --summary output/ransac_summary.json --graph annotation/graph.json
 ```
 
 ## Configuration
