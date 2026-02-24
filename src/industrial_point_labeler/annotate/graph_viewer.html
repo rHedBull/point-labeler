@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Annotation Tool — Connection Graph</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
+canvas { display: block; }
+
+#toolbar {
+    position: fixed; top: 0; left: 260px; right: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    background: rgba(15,15,35,0.95);
+    border-bottom: 1px solid #2a2a4a;
+    z-index: 100;
+}
+.btn {
+    padding: 5px 12px; border: 1px solid #3a3a6a; border-radius: 4px;
+    background: #1a1a3a; color: #c0c0e0; cursor: pointer; font-size: 12px;
+    font-family: inherit; transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { background: #2a2a5a; border-color: #5a5a9a; }
+.btn.active { background: #3a3a7a; border-color: #7a7aff; color: #fff; }
+.btn.accept { border-color: #2a6a2a; }
+.btn.accept:hover { background: #1a4a1a; border-color: #4aff4a; }
+.btn.reject { border-color: #6a2a2a; }
+.btn.reject:hover { background: #4a1a1a; border-color: #ff4a4a; }
+.btn.skip { border-color: #5a5a2a; }
+.btn.skip:hover { background: #3a3a1a; border-color: #cccc4a; }
+.btn.export { border-color: #2a6a2a; }
+.btn.export:hover { background: #1a4a1a; border-color: #4aff4a; }
+
+#sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
+    background: rgba(15,15,35,0.95); border-right: 1px solid #2a2a4a;
+    display: flex; flex-direction: column; z-index: 100;
+}
+#sidebar-header {
+    padding: 10px 12px; border-bottom: 1px solid #2a2a4a;
+    font-size: 13px; font-weight: bold; color: #7dd3fc;
+}
+#filter-tabs {
+    padding: 6px 10px; border-bottom: 1px solid #2a2a4a; display: flex; gap: 6px;
+}
+#sort-controls {
+    padding: 6px 10px; border-bottom: 1px solid #2a2a4a; display: flex; gap: 6px; align-items: center;
+    font-size: 11px; color: #888;
+}
+#sort-controls select {
+    background: #1a1a3a; color: #c0c0e0; border: 1px solid #3a3a6a;
+    border-radius: 3px; font-size: 11px; font-family: inherit; padding: 2px 4px;
+}
+#edge-list {
+    flex: 1; overflow-y: auto; font-size: 11px;
+}
+#edge-list .item {
+    padding: 5px 10px; cursor: pointer; border-bottom: 1px solid #1a1a3a;
+    display: flex; align-items: center; gap: 6px;
+    transition: background 0.1s;
+}
+#edge-list .item:hover { background: #1a1a4a; }
+#edge-list .item.active { background: #2a2a6a; border-left: 3px solid #7a7aff; }
+#edge-list .item .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-pending { background: #555; }
+.dot-accept { background: #4ade80; }
+.dot-reject { background: #f87171; }
+.dot-skip { background: #facc15; }
+#edge-list .item .edge-info { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+#edge-list .item .edge-dist { color: #666; font-size: 10px; flex-shrink: 0; }
+.label-badge {
+    display: inline-block; font-size: 9px; padding: 1px 4px; border-radius: 3px;
+    font-weight: bold; margin-right: 2px;
+}
+.label-pipe { background: #1a3a2a; color: #4ade80; }
+.label-tank { background: #3a1a1a; color: #f87171; }
+.label-equipment { background: #1a2a4a; color: #60a5fa; }
+.label-structural { background: #3a3a1a; color: #facc15; }
+.label-double { background: #3a1a3a; color: #e879f9; }
+.label-unknown { background: #2a2a2a; color: #888; }
+
+#edge-panel {
+    position: fixed; bottom: 0; left: 260px; right: 0;
+    background: rgba(15,15,35,0.95); border-top: 1px solid #2a2a4a;
+    padding: 10px 16px; z-index: 100; display: none;
+    font-size: 12px;
+}
+#edge-panel .info-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+#edge-panel .info-item { color: #888; }
+#edge-panel .info-item span { color: #e0e0e0; }
+
+#progress-bar {
+    position: fixed; bottom: 0; left: 0; width: 260px; height: 3px;
+    background: #1a1a3a; z-index: 101;
+}
+#progress-fill {
+    height: 100%; background: #4ade80; transition: width 0.3s;
+}
+
+#save-indicator {
+    font-size: 11px; color: #666; margin-left: auto;
+}
+
+#loading {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(10,10,26,0.95); z-index: 500;
+    transition: opacity 0.5s;
+}
+#loading.hidden { opacity: 0; pointer-events: none; }
+.spinner {
+    width: 48px; height: 48px; border: 4px solid #2a2a4a;
+    border-top-color: #7a7aff; border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin-bottom: 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading .text { color: #7dd3fc; font-size: 15px; }
+
+#help-bar {
+    position: fixed; bottom: 0; right: 12px;
+    font-size: 10px; color: #444; z-index: 50; padding: 4px;
+}
+#help-bar kbd {
+    background: #2a2a4a; padding: 1px 4px; border-radius: 2px;
+    color: #666; border: 1px solid #3a3a5a;
+}
+.btn.create { border-color: #2a5a6a; }
+.btn.create:hover { background: #1a3a4a; border-color: #4ac8ff; }
+.btn.create.active { background: #1a4a5a; border-color: #4ac8ff; color: #4ac8ff; }
+
+#create-panel {
+    position: fixed; bottom: 0; left: 260px; right: 0;
+    background: rgba(15,15,35,0.95); border-top: 2px solid #4ac8ff;
+    padding: 10px 16px; z-index: 100; display: none;
+    font-size: 12px;
+}
+#create-panel .info-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+#create-panel .info-item { color: #888; }
+#create-panel .info-item span { color: #e0e0e0; }
+#create-panel .step-hint { color: #4ac8ff; font-style: italic; }
+
+#graph-tooltip {
+    position: fixed; display: none; pointer-events: none;
+    background: rgba(15,15,35,0.95); border: 1px solid #3a3a6a;
+    border-radius: 4px; padding: 4px 8px; font-size: 11px;
+    color: #e0e0e0; z-index: 200; white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+    <div class="spinner"></div>
+    <div class="text">Loading graph...</div>
+</div>
+
+<div id="sidebar">
+    <div id="sidebar-header">Graph Review</div>
+    <div id="filter-tabs">
+        <button class="btn active" id="btn-all" onclick="setFilter('all')">All</button>
+        <button class="btn" id="btn-pending" onclick="setFilter('pending')">Pending</button>
+        <button class="btn" id="btn-accepted" onclick="setFilter('accept')">Accepted</button>
+        <button class="btn" id="btn-rejected" onclick="setFilter('reject')">Rejected</button>
+    </div>
+    <div id="sort-controls">
+        Sort: <select id="sort-select" onchange="applySort()">
+            <option value="n_close_pairs">Confidence (pairs)</option>
+            <option value="min_dist">Distance</option>
+            <option value="index">Original order</option>
+        </select>
+    </div>
+    <div id="edge-list"></div>
+    <div id="progress-bar"><div id="progress-fill" style="width:0%"></div></div>
+</div>
+
+<div id="toolbar">
+    <button class="btn" id="btn-prev" onclick="stepEdge(-1)">&#9664;</button>
+    <button class="btn" id="btn-next" onclick="stepEdge(1)">&#9654;</button>
+    <span id="nav-counter" style="font-size:12px; color:#888; min-width:80px;">0/0</span>
+    <span style="width:16px"></span>
+    <button class="btn accept" onclick="reviewEdge('accept')">&#10003; Accept (A)</button>
+    <button class="btn reject" onclick="reviewEdge('reject')">&#10007; Reject (R)</button>
+    <button class="btn skip" onclick="reviewEdge('skip')">&#8212; Skip (S)</button>
+    <span style="flex:1"></span>
+    <button class="btn create" id="btn-create" onclick="toggleCreateMode()">+ Add Edge (C)</button>
+    <span style="flex:1"></span>
+    <label style="font-size:11px; color:#888; cursor:pointer;">
+        <input type="checkbox" id="chk-graph" onchange="toggleGraph()"> Graph
+    </label>
+    <label id="lbl-mesh" style="font-size:11px; color:#888; cursor:pointer; display:none;">
+        <input type="checkbox" id="chk-mesh" onchange="toggleMesh()"> Mesh
+    </label>
+    <label style="font-size:11px; color:#888; cursor:pointer;">
+        <input type="checkbox" id="chk-context" checked onchange="toggleContext()"> Context
+    </label>
+    <button class="btn" onclick="saveSession()">Save</button>
+    <button class="btn export" onclick="doExport()">Export</button>
+    <span id="save-indicator"></span>
+</div>
+
+<div id="edge-panel">
+    <div class="info-row">
+        <div class="info-item">Source: <span id="ep-source"></span></div>
+        <div class="info-item">Target: <span id="ep-target"></span></div>
+        <div class="info-item">Distance: <span id="ep-dist"></span></div>
+        <div class="info-item">Close pairs: <span id="ep-pairs"></span></div>
+        <div class="info-item" id="ep-conntype-wrap" style="display:none">Type: <span id="ep-conntype"></span></div>
+    </div>
+</div>
+
+<div id="create-panel">
+    <div class="info-row">
+        <div class="info-item">Source: <span id="cp-source">—</span></div>
+        <div class="info-item">Target: <span id="cp-target">—</span></div>
+        <span class="step-hint" id="cp-hint">Ctrl+Click a segment to select source</span>
+        <span style="flex:1"></span>
+        <button class="btn accept" id="btn-create-confirm" onclick="confirmCreateEdge()" disabled>Create</button>
+        <button class="btn reject" onclick="cancelCreateMode()">Cancel</button>
+    </div>
+</div>
+
+<div id="graph-tooltip"></div>
+
+<div id="help-bar">
+    <kbd>&#8592;&#8594;</kbd> navigate &nbsp;
+    <kbd>A</kbd>/<kbd>1</kbd> accept &nbsp;
+    <kbd>R</kbd>/<kbd>2</kbd> reject &nbsp;
+    <kbd>S</kbd>/<kbd>3</kbd> skip &nbsp;
+    <kbd>F</kbd> filter pending &nbsp;
+    <kbd>C</kbd> add edge &nbsp;
+    <kbd>G</kbd> graph view &nbsp;
+    <kbd>Ctrl+S</kbd> save &nbsp;
+    <kbd>Esc</kbd> deselect/cancel
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+
+// ── State ──
+var allSegments = [];
+var segmentMap = {};     // id -> segment
+var allEdges = [];       // from server, with added _index
+var contextData = null;
+var sceneCenter = [0,0,0], sceneExtent = 1;
+var session = { reviewed: [], current_edge_index: 0 };
+
+var filter = 'all';      // 'all', 'pending', 'accept', 'reject'
+var sortKey = 'n_close_pairs';
+var displayEdges = [];    // filtered+sorted edge list
+var currentEdgeIdx = -1;  // index into displayEdges
+var showCtx = true;
+
+// Three.js objects
+var segmentClouds = {};
+var segmentOrigColors = {};
+var contextCloud = null;
+var edgeLinesAll = null;     // all edges as thin lines
+var focusLine = null;        // thick line for current edge
+var endpointMarkers = [];    // small spheres at connection endpoints
+var graphMethod = 'proximity';
+
+// Review state map: "source-target" -> action
+var reviewMap = {};
+
+var saveTimer = null;
+
+// ── Three.js Setup ──
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+var camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
+
+var container = document.createElement('div');
+container.id = 'viewport-container';
+container.style.position = 'fixed';
+container.style.overflow = 'hidden';
+document.body.appendChild(container);
+
+var renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.domElement.style.position = 'absolute';
+renderer.domElement.style.pointerEvents = 'none';
+container.appendChild(renderer.domElement);
+
+// Mesh renderer + scene (created lazily)
+var meshRenderer = null;
+var meshScene = null;
+var meshObject = null;
+var showMesh = false;
+var hasMesh = false;
+
+// 2D Graph view
+var showGraph = false;
+var graphCanvas = null;
+var graphCtx = null;
+var graphNodes = [];       // {id, x, y, vx, vy, radius, color, label, segId, nPoints}
+var graphEdgeList = [];    // {source, target, edgeIdx} indexes into graphNodes
+var graphLayoutDone = false;
+var graphDragNode = null;
+var graphAnimFrame = null;
+
+var controls = new THREE.OrbitControls(camera, container);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+
+function resizeRenderer() {
+    var left = 260, top = 42;
+    var fullW = window.innerWidth - left;
+    var h = window.innerHeight - top;
+    var splitRight = showMesh || showGraph;
+    var pcW = splitRight ? Math.floor(fullW / 2) : fullW;
+
+    renderer.setSize(pcW, h);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.domElement.style.left = '0px';
+    renderer.domElement.style.top = '0px';
+    camera.aspect = pcW / h;
+    camera.updateProjectionMatrix();
+
+    if (meshRenderer && showMesh) {
+        var meshW = fullW - pcW;
+        meshRenderer.setSize(meshW, h);
+        meshRenderer.setPixelRatio(window.devicePixelRatio);
+        meshRenderer.domElement.style.left = pcW + 'px';
+        meshRenderer.domElement.style.top = '0px';
+        meshRenderer.domElement.style.display = '';
+    }
+    if (meshRenderer && !showMesh) {
+        meshRenderer.domElement.style.display = 'none';
+    }
+
+    if (graphCanvas && showGraph) {
+        var gW = fullW - pcW;
+        graphCanvas.width = gW * window.devicePixelRatio;
+        graphCanvas.height = h * window.devicePixelRatio;
+        graphCanvas.style.width = gW + 'px';
+        graphCanvas.style.height = h + 'px';
+        graphCanvas.style.left = pcW + 'px';
+        graphCanvas.style.top = '0px';
+        graphCanvas.style.display = '';
+        if (graphCtx) graphCtx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+        renderGraph();
+    }
+    if (graphCanvas && !showGraph) {
+        graphCanvas.style.display = 'none';
+    }
+
+    container.style.left = left + 'px';
+    container.style.top = top + 'px';
+    container.style.width = fullW + 'px';
+    container.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeRenderer);
+
+// ── Camera Animation ──
+var animating = false, animStart = 0, animDuration = 600;
+var camFrom = {}, camTo = {};
+
+function animateCamera(pos, look) {
+    camFrom = {
+        px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+        tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+    };
+    camTo = { px: pos.x, py: pos.y, pz: pos.z, tx: look.x, ty: look.y, tz: look.z };
+    animStart = performance.now();
+    animating = true;
+}
+
+function easeInOutCubic(t) {
+    return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+}
+
+function updateCameraAnim() {
+    if (!animating) return;
+    var t = Math.min((performance.now() - animStart) / animDuration, 1);
+    t = easeInOutCubic(t);
+    camera.position.set(
+        camFrom.px + (camTo.px - camFrom.px) * t,
+        camFrom.py + (camTo.py - camFrom.py) * t,
+        camFrom.pz + (camTo.pz - camFrom.pz) * t
+    );
+    controls.target.set(
+        camFrom.tx + (camTo.tx - camFrom.tx) * t,
+        camFrom.ty + (camTo.ty - camFrom.ty) * t,
+        camFrom.tz + (camTo.tz - camFrom.tz) * t
+    );
+    if (t >= 1) animating = false;
+}
+
+function focusPair(segA, segB, endpoint) {
+    var cA = endpoint || segA.center, cB = segB.center;
+    var mid = [(cA[0]+cB[0])/2, (cA[1]+cB[1])/2, (cA[2]+cB[2])/2];
+    var pairDist = Math.sqrt(Math.pow(cA[0]-cB[0], 2) + Math.pow(cA[1]-cB[1], 2) + Math.pow(cA[2]-cB[2], 2));
+    var extent = Math.max(pairDist, segA.extent, segB.extent) * 2.0;
+    var d = Math.max(extent, 1.0);
+    var look = new THREE.Vector3(mid[0], mid[1], mid[2]);
+    var pos = new THREE.Vector3(mid[0] + d*0.5, mid[1] + d*0.4, mid[2] + d*0.5);
+    animateCamera(pos, look);
+}
+
+function focusScene() {
+    var c = new THREE.Vector3(sceneCenter[0], sceneCenter[1], sceneCenter[2]);
+    var d = sceneExtent * 0.9;
+    animateCamera(new THREE.Vector3(c.x + d*0.6, c.y + d*0.4, c.z + d*0.6), c);
+}
+
+// ── Point Clouds ──
+var CLASS_COLORS = {
+    pipe: [0.29, 0.87, 0.50],
+    tank: [0.97, 0.44, 0.44],
+    equipment: [0.38, 0.65, 0.98],
+    structural: [0.98, 0.80, 0.08],
+    double: [0.91, 0.47, 0.98],
+};
+var GOLDEN_RATIO = 0.618033988;
+
+function hueToRgb(hue) {
+    var h = hue * 6;
+    var x = 1.0 - Math.abs(h % 2 - 1);
+    if (h < 1) return [1, x, 0];
+    if (h < 2) return [x, 1, 0];
+    if (h < 3) return [0, 1, x];
+    if (h < 4) return [0, x, 1];
+    if (h < 5) return [x, 0, 1];
+    return [1, 0, x];
+}
+
+function makePointCloud(seg) {
+    var n = seg.x.length;
+    var geom = new THREE.BufferGeometry();
+    var pos = new Float32Array(n * 3);
+    var col = new Float32Array(n * 3);
+
+    var rgb = hueToRgb((seg.id * GOLDEN_RATIO) % 1.0);
+    for (var i = 0; i < n; i++) {
+        pos[i*3] = seg.x[i]; pos[i*3+1] = seg.y[i]; pos[i*3+2] = seg.z[i];
+        col[i*3] = rgb[0]; col[i*3+1] = rgb[1]; col[i*3+2] = rgb[2];
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    var mat = new THREE.PointsMaterial({
+        size: 0.025, vertexColors: true, transparent: true, opacity: 1.0,
+        sizeAttenuation: true,
+    });
+    var pts = new THREE.Points(geom, mat);
+    pts.userData.segId = seg.id;
+    return pts;
+}
+
+function buildContextCloud() {
+    if (!contextData) return;
+    var n = contextData.x.length;
+    var geom = new THREE.BufferGeometry();
+    var pos = new Float32Array(n * 3);
+    var col = new Float32Array(n * 3);
+    for (var i = 0; i < n; i++) {
+        pos[i*3] = contextData.x[i]; pos[i*3+1] = contextData.y[i]; pos[i*3+2] = contextData.z[i];
+        col[i*3] = contextData.r[i]/255; col[i*3+1] = contextData.g[i]/255; col[i*3+2] = contextData.b[i]/255;
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    var mat = new THREE.PointsMaterial({
+        size: 0.015, vertexColors: true, transparent: true, opacity: 0.3,
+        sizeAttenuation: true,
+    });
+    contextCloud = new THREE.Points(geom, mat);
+    scene.add(contextCloud);
+}
+
+function buildScene() {
+    var id;
+    for (id in segmentClouds) scene.remove(segmentClouds[id]);
+    segmentClouds = {};
+    segmentOrigColors = {};
+
+    for (var si = 0; si < allSegments.length; si++) {
+        var seg = allSegments[si];
+        var cloud = makePointCloud(seg);
+        scene.add(cloud);
+        segmentClouds[seg.id] = cloud;
+        segmentOrigColors[seg.id] = cloud.geometry.attributes.color.array.slice();
+    }
+    if (contextCloud) contextCloud.visible = showCtx;
+}
+
+// ── Edge Lines ──
+function edgeKey(src, tgt) { return src + '-' + tgt; }
+
+function getEdgeAction(edge) {
+    return reviewMap[edgeKey(edge.source, edge.target)] || 'pending';
+}
+
+var EDGE_COLORS = {
+    pending: new THREE.Color(0.4, 0.4, 0.5),
+    accept: new THREE.Color(0.3, 0.85, 0.5),
+    reject: new THREE.Color(0.97, 0.44, 0.44),
+    skip: new THREE.Color(0.7, 0.7, 0.2),
+};
+
+// Tube-based edge lines for reviewed edges (more visible)
+var edgeTubes = [];  // {mesh, edgeIdx}
+
+function clearEdgeTubes() {
+    for (var i = 0; i < edgeTubes.length; i++) scene.remove(edgeTubes[i].mesh);
+    edgeTubes = [];
+}
+
+function buildEdgeTubes() {
+    clearEdgeTubes();
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var edge = allEdges[ei];
+        var action = getEdgeAction(edge);
+        if (action === 'pending') continue;
+        var start = edgeStartPoint(edge);
+        var end = edgeEndPoint(edge);
+        if (!start || !end) continue;
+        var s = new THREE.Vector3(start[0], start[1], start[2]);
+        var e = new THREE.Vector3(end[0], end[1], end[2]);
+        var dir = new THREE.Vector3().subVectors(e, s);
+        var len = dir.length();
+        if (len < 0.001) continue;
+        var geom = new THREE.CylinderBufferGeometry(0.012, 0.012, len, 4, 1);
+        geom.rotateX(Math.PI / 2);
+        var c = EDGE_COLORS[action];
+        var mat = new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.8 });
+        var mesh = new THREE.Mesh(geom, mat);
+        var mid = new THREE.Vector3().addVectors(s, e).multiplyScalar(0.5);
+        mesh.position.copy(mid);
+        mesh.lookAt(e);
+        scene.add(mesh);
+        edgeTubes.push({ mesh: mesh, edgeIdx: ei });
+    }
+}
+
+// Neighbor map: segId -> [{edge, neighborId}]
+var neighborMap = {};
+
+function buildNeighborMap() {
+    neighborMap = {};
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var edge = allEdges[ei];
+        if (!neighborMap[edge.source]) neighborMap[edge.source] = [];
+        if (!neighborMap[edge.target]) neighborMap[edge.target] = [];
+        neighborMap[edge.source].push({ edge: edge, neighborId: edge.target });
+        neighborMap[edge.target].push({ edge: edge, neighborId: edge.source });
+    }
+}
+
+function highlightSegmentNeighbors(segId) {
+    resetAllSegmentColors();
+    removeFocusLine();
+
+    var neighbors = neighborMap[segId] || [];
+    var connectedIds = new Set();
+    connectedIds.add(segId);
+    for (var i = 0; i < neighbors.length; i++) connectedIds.add(neighbors[i].neighborId);
+
+    // Dim all segments
+    for (var si = 0; si < allSegments.length; si++) {
+        var cloud = segmentClouds[allSegments[si].id];
+        if (!cloud) continue;
+        cloud.material.opacity = connectedIds.has(allSegments[si].id) ? 1.0 : 0.08;
+    }
+
+    // Color the clicked segment yellow
+    var mainCloud = segmentClouds[segId];
+    if (mainCloud) {
+        var arr = mainCloud.geometry.attributes.color.array;
+        for (var i = 0; i < arr.length; i += 3) { arr[i] = 1; arr[i+1] = 1; arr[i+2] = 0.3; }
+        mainCloud.geometry.attributes.color.needsUpdate = true;
+    }
+
+    // Color neighbors by their edge status
+    for (var ni = 0; ni < neighbors.length; ni++) {
+        var nb = neighbors[ni];
+        var action = getEdgeAction(nb.edge);
+        var cloud = segmentClouds[nb.neighborId];
+        if (!cloud) continue;
+        var arr = cloud.geometry.attributes.color.array;
+        var rgb;
+        if (action === 'accept') rgb = [0.3, 0.85, 0.5];
+        else if (action === 'reject') rgb = [0.97, 0.44, 0.44];
+        else if (action === 'skip') rgb = [0.7, 0.7, 0.2];
+        else rgb = [0.6, 0.6, 0.7]; // pending: light gray
+        for (var i = 0; i < arr.length; i += 3) { arr[i] = rgb[0]; arr[i+1] = rgb[1]; arr[i+2] = rgb[2]; }
+        cloud.geometry.attributes.color.needsUpdate = true;
+
+        // Draw thick tube to each neighbor
+        var start = edgeStartPoint(nb.edge);
+        var end = edgeEndPoint(nb.edge);
+        if (start && end) {
+            var s = new THREE.Vector3(start[0], start[1], start[2]);
+            var e = new THREE.Vector3(end[0], end[1], end[2]);
+            var dir = new THREE.Vector3().subVectors(e, s);
+            var len = dir.length();
+            if (len > 0.001) {
+                var tubeGeo = new THREE.CylinderBufferGeometry(0.02, 0.02, len, 6, 1);
+                tubeGeo.rotateX(Math.PI / 2);
+                var c = EDGE_COLORS[action];
+                var tubeMat = new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9 });
+                var tube = new THREE.Mesh(tubeGeo, tubeMat);
+                var mid = new THREE.Vector3().addVectors(s, e).multiplyScalar(0.5);
+                tube.position.copy(mid);
+                tube.lookAt(e);
+                scene.add(tube);
+                if (!focusLine) focusLine = [];
+                if (Array.isArray(focusLine)) focusLine.push(tube);
+            }
+        }
+
+        // Add endpoint spheres at connection points
+        var markerGeo = new THREE.SphereBufferGeometry(0.04, 8, 6);
+        if (start) {
+            var sMat = new THREE.MeshBasicMaterial({ color: EDGE_COLORS[action] });
+            var sMesh = new THREE.Mesh(markerGeo, sMat);
+            sMesh.position.set(start[0], start[1], start[2]);
+            scene.add(sMesh);
+            if (!focusLine) focusLine = [];
+            if (Array.isArray(focusLine)) focusLine.push(sMesh);
+        }
+        if (end) {
+            var eMat = new THREE.MeshBasicMaterial({ color: EDGE_COLORS[action] });
+            var eMesh = new THREE.Mesh(markerGeo, eMat);
+            eMesh.position.set(end[0], end[1], end[2]);
+            scene.add(eMesh);
+            if (Array.isArray(focusLine)) focusLine.push(eMesh);
+        }
+    }
+}
+
+function edgeStartPoint(edge) {
+    // Use endpoint coordinate if available, otherwise source center
+    if (edge.endpoint) return edge.endpoint;
+    var s = segmentMap[edge.source];
+    return s ? s.center : null;
+}
+
+function edgeEndPoint(edge) {
+    // Use target endpoint if available, otherwise target center
+    if (edge.endpoint_target) return edge.endpoint_target;
+    var t = segmentMap[edge.target];
+    return t ? t.center : null;
+}
+
+function buildEdgeLines() {
+    if (edgeLinesAll) scene.remove(edgeLinesAll);
+    clearEndpointMarkers();
+
+    var positions = [];
+    var colors = [];
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var edge = allEdges[ei];
+        var start = edgeStartPoint(edge);
+        var end = edgeEndPoint(edge);
+        if (!start || !end) continue;
+        positions.push(start[0], start[1], start[2]);
+        positions.push(end[0], end[1], end[2]);
+        var c = EDGE_COLORS[getEdgeAction(edge)];
+        colors.push(c.r, c.g, c.b);
+        colors.push(c.r, c.g, c.b);
+    }
+
+    var geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    var mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7 });
+    edgeLinesAll = new THREE.LineSegments(geom, mat);
+    scene.add(edgeLinesAll);
+
+    // Build endpoint markers for pipe_endpoint method
+    if (graphMethod === 'pipe_endpoint') {
+        buildEndpointMarkers();
+    }
+}
+
+function buildEndpointMarkers() {
+    var markerGeo = new THREE.SphereBufferGeometry(0.03, 8, 6);
+    var srcMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.7 });
+    var tgtMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.7 });
+    var seen = {};
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var eps = [
+            [allEdges[ei].endpoint, srcMat],
+            [allEdges[ei].endpoint_target, tgtMat],
+        ];
+        for (var pi = 0; pi < eps.length; pi++) {
+            var ep = eps[pi][0], mat = eps[pi][1];
+            if (!ep) continue;
+            var key = ep[0].toFixed(3) + ',' + ep[1].toFixed(3) + ',' + ep[2].toFixed(3);
+            if (seen[key]) continue;
+            seen[key] = true;
+            var mesh = new THREE.Mesh(markerGeo, mat);
+            mesh.position.set(ep[0], ep[1], ep[2]);
+            scene.add(mesh);
+            endpointMarkers.push(mesh);
+        }
+    }
+}
+
+function clearEndpointMarkers() {
+    for (var i = 0; i < endpointMarkers.length; i++) {
+        scene.remove(endpointMarkers[i]);
+    }
+    endpointMarkers = [];
+}
+
+function updateEdgeColors() {
+    if (!edgeLinesAll) return;
+    var colArr = edgeLinesAll.geometry.attributes.color.array;
+    var idx = 0;
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var edge = allEdges[ei];
+        var start = edgeStartPoint(edge);
+        var end = edgeEndPoint(edge);
+        if (!start || !end) continue;
+        var c = EDGE_COLORS[getEdgeAction(edge)];
+        colArr[idx] = c.r; colArr[idx+1] = c.g; colArr[idx+2] = c.b;
+        colArr[idx+3] = c.r; colArr[idx+4] = c.g; colArr[idx+5] = c.b;
+        idx += 6;
+    }
+    edgeLinesAll.geometry.attributes.color.needsUpdate = true;
+}
+
+function showFocusLine(startPt, endPt) {
+    removeFocusLine();
+    var s = new THREE.Vector3(startPt[0], startPt[1], startPt[2]);
+    var e = new THREE.Vector3(endPt[0], endPt[1], endPt[2]);
+    var dir = new THREE.Vector3().subVectors(e, s);
+    var len = dir.length();
+    if (len < 0.001) return;
+
+    // Thick white tube
+    var tubeGeo = new THREE.CylinderBufferGeometry(0.02, 0.02, len, 6, 1);
+    tubeGeo.rotateX(Math.PI / 2);
+    var tubeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+    var tube = new THREE.Mesh(tubeGeo, tubeMat);
+    var mid = new THREE.Vector3().addVectors(s, e).multiplyScalar(0.5);
+    tube.position.copy(mid);
+    tube.lookAt(e);
+    scene.add(tube);
+
+    // Endpoint spheres
+    var markerGeo = new THREE.SphereBufferGeometry(0.04, 8, 6);
+    var sMesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x4ade80 }));
+    sMesh.position.copy(s);
+    scene.add(sMesh);
+    var eMesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x60a5fa }));
+    eMesh.position.copy(e);
+    scene.add(eMesh);
+
+    focusLine = [tube, sMesh, eMesh];
+}
+
+function removeFocusLine() {
+    if (Array.isArray(focusLine)) {
+        for (var i = 0; i < focusLine.length; i++) scene.remove(focusLine[i]);
+    } else if (focusLine) {
+        scene.remove(focusLine);
+    }
+    focusLine = null;
+}
+
+// ── Segment Highlighting ──
+function resetAllSegmentColors() {
+    for (var si = 0; si < allSegments.length; si++) {
+        var seg = allSegments[si];
+        var cloud = segmentClouds[seg.id];
+        if (!cloud) continue;
+        var orig = segmentOrigColors[seg.id];
+        if (orig) {
+            cloud.geometry.attributes.color.array.set(orig);
+            cloud.geometry.attributes.color.needsUpdate = true;
+        }
+        cloud.material.opacity = 1.0;
+    }
+}
+
+function highlightEdge(edge) {
+    // Dim all segments
+    for (var si = 0; si < allSegments.length; si++) {
+        var seg = allSegments[si];
+        var cloud = segmentClouds[seg.id];
+        if (!cloud) continue;
+        cloud.material.opacity = 0.12;
+    }
+
+    // Highlight source (green) and target (blue)
+    var srcCloud = segmentClouds[edge.source];
+    var tgtCloud = segmentClouds[edge.target];
+    if (srcCloud) {
+        var srcArr = srcCloud.geometry.attributes.color.array;
+        for (var i = 0; i < srcArr.length; i += 3) { srcArr[i] = 0.3; srcArr[i+1] = 0.9; srcArr[i+2] = 0.5; }
+        srcCloud.geometry.attributes.color.needsUpdate = true;
+        srcCloud.material.opacity = 1.0;
+    }
+    if (tgtCloud) {
+        var tgtArr = tgtCloud.geometry.attributes.color.array;
+        for (var i = 0; i < tgtArr.length; i += 3) { tgtArr[i] = 0.4; tgtArr[i+1] = 0.6; tgtArr[i+2] = 1.0; }
+        tgtCloud.geometry.attributes.color.needsUpdate = true;
+        tgtCloud.material.opacity = 1.0;
+    }
+
+    // Focus line + camera
+    var segA = segmentMap[edge.source];
+    var segB = segmentMap[edge.target];
+    if (segA && segB) {
+        var start = edgeStartPoint(edge);
+        var end = edgeEndPoint(edge);
+        showFocusLine(start, end);
+        focusPair(segA, segB, edge.endpoint);
+    }
+}
+
+function clearHighlight() {
+    resetAllSegmentColors();
+    removeFocusLine();
+    currentEdgeIdx = -1;
+    document.getElementById('edge-panel').style.display = 'none';
+    updateNavCounter();
+    buildEdgeList();
+    if (showGraph) renderGraph();
+}
+
+// ── DOM Helpers (safe, no innerHTML) ──
+function makeLabelBadge(label) {
+    var badge = document.createElement('span');
+    badge.className = 'label-badge label-' + (label || 'unknown');
+    badge.textContent = (label || '?').substring(0, 4);
+    return badge;
+}
+
+function makeEdgeInfoNodes(srcLabel, srcId, tgtLabel, tgtId) {
+    var frag = document.createDocumentFragment();
+    frag.appendChild(makeLabelBadge(srcLabel));
+    frag.appendChild(document.createTextNode('#' + srcId + ' \u2194 '));
+    frag.appendChild(makeLabelBadge(tgtLabel));
+    frag.appendChild(document.createTextNode('#' + tgtId));
+    return frag;
+}
+
+function setElementChildren(el, frag) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(frag);
+}
+
+// ── Edge Display List ──
+function computeDisplayEdges() {
+    var filtered;
+    if (filter === 'all') {
+        filtered = allEdges.slice();
+    } else {
+        filtered = allEdges.filter(function(e) { return getEdgeAction(e) === filter; });
+    }
+
+    if (sortKey === 'n_close_pairs') {
+        filtered.sort(function(a, b) { return b.n_close_pairs - a.n_close_pairs; });
+    } else if (sortKey === 'min_dist') {
+        filtered.sort(function(a, b) { return a.min_dist - b.min_dist; });
+    }
+    // 'index' keeps original order
+
+    displayEdges = filtered;
+}
+
+function setFilter(f) {
+    filter = f;
+    currentEdgeIdx = -1;
+    document.getElementById('btn-all').classList.toggle('active', f === 'all');
+    document.getElementById('btn-pending').classList.toggle('active', f === 'pending');
+    document.getElementById('btn-accepted').classList.toggle('active', f === 'accept');
+    document.getElementById('btn-rejected').classList.toggle('active', f === 'reject');
+    computeDisplayEdges();
+    buildEdgeList();
+    updateNavCounter();
+    updateFilterCounts();
+}
+
+function applySort() {
+    sortKey = document.getElementById('sort-select').value;
+    computeDisplayEdges();
+    buildEdgeList();
+}
+
+function updateFilterCounts() {
+    var nPending = 0, nAccepted = 0, nRejected = 0;
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var a = getEdgeAction(allEdges[ei]);
+        if (a === 'accept') nAccepted++;
+        else if (a === 'reject') nRejected++;
+        else if (a !== 'skip') nPending++;
+    }
+    document.getElementById('btn-all').textContent = 'All (' + allEdges.length + ')';
+    document.getElementById('btn-pending').textContent = 'Pending (' + nPending + ')';
+    document.getElementById('btn-accepted').textContent = 'Accepted (' + nAccepted + ')';
+    document.getElementById('btn-rejected').textContent = 'Rejected (' + nRejected + ')';
+
+    var reviewed = nAccepted + nRejected;
+    var pct = allEdges.length > 0 ? (reviewed / allEdges.length * 100) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function buildEdgeList() {
+    var list = document.getElementById('edge-list');
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    for (var i = 0; i < displayEdges.length; i++) {
+        (function(idx) {
+            var edge = displayEdges[idx];
+            var item = document.createElement('div');
+            item.className = 'item' + (idx === currentEdgeIdx ? ' active' : '');
+
+            var dot = document.createElement('span');
+            dot.className = 'status-dot dot-' + getEdgeAction(edge);
+
+            var info = document.createElement('span');
+            info.className = 'edge-info';
+            var srcSeg = segmentMap[edge.source];
+            var tgtSeg = segmentMap[edge.target];
+            var srcLabel = srcSeg ? srcSeg.label : '?';
+            var tgtLabel = tgtSeg ? tgtSeg.label : '?';
+            info.appendChild(makeEdgeInfoNodes(srcLabel, edge.source, tgtLabel, edge.target));
+
+            var dist = document.createElement('span');
+            dist.className = 'edge-dist';
+            dist.textContent = edge.min_dist.toFixed(3) + 'm';
+
+            item.appendChild(dot);
+            item.appendChild(info);
+            item.appendChild(dist);
+
+            item.addEventListener('click', function() { selectEdge(idx); });
+
+            list.appendChild(item);
+        })(i);
+    }
+}
+
+function updateNavCounter() {
+    if (currentEdgeIdx >= 0 && currentEdgeIdx < displayEdges.length) {
+        document.getElementById('nav-counter').textContent =
+            (currentEdgeIdx + 1) + '/' + displayEdges.length;
+    } else {
+        document.getElementById('nav-counter').textContent = displayEdges.length + ' edges';
+    }
+}
+
+// ── Edge Selection + Navigation ──
+function selectEdge(idx) {
+    if (idx < 0 || idx >= displayEdges.length) return;
+    currentEdgeIdx = idx;
+    var edge = displayEdges[idx];
+
+    resetAllSegmentColors();
+    highlightEdge(edge);
+
+    // Update info panel using safe DOM methods
+    var srcSeg = segmentMap[edge.source];
+    var tgtSeg = segmentMap[edge.target];
+    var srcLabel = srcSeg ? srcSeg.label : '?';
+    var tgtLabel = tgtSeg ? tgtSeg.label : '?';
+
+    var srcFrag = document.createDocumentFragment();
+    srcFrag.appendChild(makeLabelBadge(srcLabel));
+    srcFrag.appendChild(document.createTextNode('#' + edge.source +
+        (srcSeg ? ' (' + srcSeg.n_points + ' pts)' : '')));
+    setElementChildren(document.getElementById('ep-source'), srcFrag);
+
+    var tgtFrag = document.createDocumentFragment();
+    tgtFrag.appendChild(makeLabelBadge(tgtLabel));
+    tgtFrag.appendChild(document.createTextNode('#' + edge.target +
+        (tgtSeg ? ' (' + tgtSeg.n_points + ' pts)' : '')));
+    setElementChildren(document.getElementById('ep-target'), tgtFrag);
+
+    document.getElementById('ep-dist').textContent = edge.min_dist.toFixed(4) + 'm';
+    document.getElementById('ep-pairs').textContent = edge.n_close_pairs.toLocaleString();
+    if (edge.connection_type) {
+        document.getElementById('ep-conntype').textContent = edge.connection_type;
+        document.getElementById('ep-conntype-wrap').style.display = '';
+    } else {
+        document.getElementById('ep-conntype-wrap').style.display = 'none';
+    }
+    document.getElementById('edge-panel').style.display = 'block';
+
+    updateNavCounter();
+    buildEdgeList();
+    var activeEl = document.querySelector('#edge-list .item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+    if (showGraph) renderGraph();
+}
+
+function stepEdge(delta) {
+    if (displayEdges.length === 0) return;
+    if (currentEdgeIdx < 0) {
+        currentEdgeIdx = delta > 0 ? 0 : displayEdges.length - 1;
+    } else {
+        currentEdgeIdx = ((currentEdgeIdx + delta) % displayEdges.length + displayEdges.length) % displayEdges.length;
+    }
+    selectEdge(currentEdgeIdx);
+}
+
+// ── Review Actions ──
+async function postReviewEdge(source, target, action) {
+    await fetch('/review-edge', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source, target, action}),
+    });
+}
+
+function reviewEdge(action) {
+    if (currentEdgeIdx < 0 || currentEdgeIdx >= displayEdges.length) return;
+    var edge = displayEdges[currentEdgeIdx];
+    var key = edgeKey(edge.source, edge.target);
+
+    reviewMap[key] = action;
+
+    // POST review to server
+    postReviewEdge(edge.source, edge.target, action);
+
+    // Update session.reviewed
+    var existing = -1;
+    for (var ri = 0; ri < session.reviewed.length; ri++) {
+        if (session.reviewed[ri].source === edge.source && session.reviewed[ri].target === edge.target) {
+            existing = ri;
+            break;
+        }
+    }
+    var entry = {
+        edge_id: edge._index,
+        source: edge.source,
+        target: edge.target,
+        action: action,
+    };
+    if (existing >= 0) {
+        session.reviewed[existing] = entry;
+    } else {
+        session.reviewed.push(entry);
+    }
+
+    updateEdgeColors();
+    buildEdgeTubes();
+    updateFilterCounts();
+    if (showGraph) renderGraph();
+
+    // If filter is 'pending' and we just reviewed, recompute and stay in place
+    if (filter === 'pending' && action !== 'pending') {
+        computeDisplayEdges();
+        if (currentEdgeIdx >= displayEdges.length) {
+            currentEdgeIdx = displayEdges.length - 1;
+        }
+        if (currentEdgeIdx >= 0) {
+            selectEdge(currentEdgeIdx);
+        } else {
+            clearHighlight();
+        }
+    } else {
+        // Auto-advance to next
+        if (currentEdgeIdx < displayEdges.length - 1) {
+            selectEdge(currentEdgeIdx + 1);
+        } else {
+            buildEdgeList();
+        }
+    }
+
+    scheduleSave();
+}
+
+// ── Context Toggle ──
+function toggleContext() {
+    showCtx = document.getElementById('chk-context').checked;
+    if (contextCloud) contextCloud.visible = showCtx;
+}
+
+// ── Mesh Toggle ──
+function toggleMesh() {
+    showMesh = document.getElementById('chk-mesh').checked;
+    // Mutually exclusive with graph
+    if (showMesh && showGraph) {
+        showGraph = false;
+        document.getElementById('chk-graph').checked = false;
+        if (graphCanvas) graphCanvas.style.display = 'none';
+        stopGraphRenderLoop();
+    }
+    if (showMesh && !meshRenderer) {
+        meshRenderer = new THREE.WebGLRenderer({ antialias: true });
+        meshRenderer.domElement.style.position = 'absolute';
+        meshRenderer.domElement.style.pointerEvents = 'none';
+        container.appendChild(meshRenderer.domElement);
+
+        meshScene = new THREE.Scene();
+        meshScene.background = new THREE.Color(0x0a0a1a);
+        meshScene.add(new THREE.AmbientLight(0xffffff, 1.0));
+    }
+    if (showMesh && !meshObject) {
+        var loader = new THREE.GLTFLoader();
+        loader.load('/mesh.glb', function(gltf) {
+            gltf.scene.traverse(function(child) {
+                if (child.isMesh && child.material) {
+                    var oldMat = child.material;
+                    var newMat = new THREE.MeshBasicMaterial();
+                    if (oldMat.map) newMat.map = oldMat.map;
+                    if (oldMat.color) newMat.color.copy(oldMat.color);
+                    if (oldMat.vertexColors) newMat.vertexColors = true;
+                    child.material = newMat;
+                }
+            });
+            meshObject = gltf.scene;
+            meshScene.add(meshObject);
+        });
+    }
+    resizeRenderer();
+}
+
+// ── 2D Graph View ──
+function toggleGraph() {
+    showGraph = document.getElementById('chk-graph').checked;
+    // Mutually exclusive with mesh
+    if (showGraph && showMesh) {
+        showMesh = false;
+        document.getElementById('chk-mesh').checked = false;
+        if (meshRenderer) meshRenderer.domElement.style.display = 'none';
+    }
+    if (showGraph) {
+        if (!graphCanvas) {
+            graphCanvas = document.createElement('canvas');
+            graphCanvas.style.position = 'absolute';
+            graphCanvas.style.background = '#0a0a1a';
+            graphCanvas.style.cursor = 'default';
+            container.appendChild(graphCanvas);
+            graphCtx = graphCanvas.getContext('2d');
+            setupGraphInteraction();
+        }
+        buildGraphData();
+        runForceLayout();
+    } else {
+        stopGraphRenderLoop();
+    }
+    resizeRenderer();
+}
+
+function buildGraphData() {
+    graphNodes = [];
+    graphEdgeList = [];
+    var nodeMap = {}; // segId -> index in graphNodes
+
+    for (var si = 0; si < allSegments.length; si++) {
+        var seg = allSegments[si];
+        // Only include segments that participate in edges
+        var inEdge = false;
+        for (var ei = 0; ei < allEdges.length; ei++) {
+            if (allEdges[ei].source === seg.id || allEdges[ei].target === seg.id) {
+                inEdge = true; break;
+            }
+        }
+        if (!inEdge) continue;
+
+        var rgb = hueToRgb((seg.id * GOLDEN_RATIO) % 1.0);
+        var r = Math.max(6, Math.min(24, Math.log(seg.n_points + 1) * 3));
+        nodeMap[seg.id] = graphNodes.length;
+        graphNodes.push({
+            id: seg.id,
+            x: (Math.sin(seg.id * 7.13) * 0.4 + 0.5) * 400 + 50,
+            y: (Math.cos(seg.id * 3.77) * 0.4 + 0.5) * 400 + 50,
+            vx: 0, vy: 0,
+            radius: r,
+            color: 'rgb(' + Math.round(rgb[0]*255) + ',' + Math.round(rgb[1]*255) + ',' + Math.round(rgb[2]*255) + ')',
+            label: seg.label || '?',
+            segId: seg.id,
+            nPoints: seg.n_points,
+        });
+    }
+
+    for (var ei = 0; ei < allEdges.length; ei++) {
+        var edge = allEdges[ei];
+        var si2 = nodeMap[edge.source];
+        var ti2 = nodeMap[edge.target];
+        if (si2 !== undefined && ti2 !== undefined) {
+            graphEdgeList.push({ source: si2, target: ti2, edgeIdx: ei });
+        }
+    }
+    graphLayoutDone = false;
+}
+
+function runForceLayout() {
+    var iteration = 0;
+    var maxIter = 300;
+    var cooling = 1.0;
+
+    // Center initial positions within canvas
+    if (graphCanvas) {
+        var cw = parseInt(graphCanvas.style.width) || 400;
+        var ch = parseInt(graphCanvas.style.height) || 400;
+        for (var i = 0; i < graphNodes.length; i++) {
+            graphNodes[i].x = (Math.sin(graphNodes[i].id * 7.13) * 0.35 + 0.5) * cw;
+            graphNodes[i].y = (Math.cos(graphNodes[i].id * 3.77) * 0.35 + 0.5) * ch;
+        }
+    }
+
+    function batch() {
+        var batchSize = 50;
+        for (var b = 0; b < batchSize && iteration < maxIter; b++, iteration++) {
+            cooling = 1.0 - iteration / maxIter;
+            var temp = cooling * 8.0;
+
+            // Repulsion (Coulomb)
+            for (var i = 0; i < graphNodes.length; i++) {
+                graphNodes[i].vx = 0;
+                graphNodes[i].vy = 0;
+            }
+            for (var i = 0; i < graphNodes.length; i++) {
+                for (var j = i + 1; j < graphNodes.length; j++) {
+                    var dx = graphNodes[i].x - graphNodes[j].x;
+                    var dy = graphNodes[i].y - graphNodes[j].y;
+                    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    var force = 5000.0 / (dist * dist);
+                    var fx = (dx / dist) * force;
+                    var fy = (dy / dist) * force;
+                    graphNodes[i].vx += fx;
+                    graphNodes[i].vy += fy;
+                    graphNodes[j].vx -= fx;
+                    graphNodes[j].vy -= fy;
+                }
+            }
+
+            // Attraction (spring)
+            for (var ei = 0; ei < graphEdgeList.length; ei++) {
+                var e = graphEdgeList[ei];
+                var nA = graphNodes[e.source];
+                var nB = graphNodes[e.target];
+                var dx = nB.x - nA.x;
+                var dy = nB.y - nA.y;
+                var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                var idealLen = 100;
+                var force = (dist - idealLen) * 0.05;
+                var fx = (dx / dist) * force;
+                var fy = (dy / dist) * force;
+                nA.vx += fx;
+                nA.vy += fy;
+                nB.vx -= fx;
+                nB.vy -= fy;
+            }
+
+            // Apply with temperature
+            for (var i = 0; i < graphNodes.length; i++) {
+                var n = graphNodes[i];
+                if (n === graphDragNode) continue;
+                var vLen = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 1;
+                n.x += (n.vx / vLen) * Math.min(Math.abs(n.vx), temp);
+                n.y += (n.vy / vLen) * Math.min(Math.abs(n.vy), temp);
+            }
+        }
+
+        renderGraph();
+        if (iteration < maxIter) {
+            setTimeout(batch, 16);
+        } else {
+            graphLayoutDone = true;
+            renderGraph();
+        }
+    }
+    batch();
+}
+
+function renderGraph() {
+    if (!graphCtx || !graphCanvas) return;
+    var w = parseInt(graphCanvas.style.width) || 400;
+    var h = parseInt(graphCanvas.style.height) || 400;
+    graphCtx.clearRect(0, 0, w, h);
+
+    // Draw edges
+    for (var ei = 0; ei < graphEdgeList.length; ei++) {
+        var ge = graphEdgeList[ei];
+        var nA = graphNodes[ge.source];
+        var nB = graphNodes[ge.target];
+        var edge = allEdges[ge.edgeIdx];
+        var action = getEdgeAction(edge);
+
+        // Check if this is the currently selected edge
+        var isSelected = false;
+        if (currentEdgeIdx >= 0 && currentEdgeIdx < displayEdges.length) {
+            var selEdge = displayEdges[currentEdgeIdx];
+            if (selEdge.source === edge.source && selEdge.target === edge.target) {
+                isSelected = true;
+            }
+        }
+
+        graphCtx.beginPath();
+        graphCtx.moveTo(nA.x, nA.y);
+        graphCtx.lineTo(nB.x, nB.y);
+        if (isSelected) {
+            graphCtx.strokeStyle = '#ffffff';
+            graphCtx.lineWidth = 3;
+        } else {
+            var ec = { pending: '#666', accept: '#4ade80', reject: '#f87171', skip: '#facc15' };
+            graphCtx.strokeStyle = ec[action] || '#666';
+            graphCtx.lineWidth = 1.5;
+        }
+        graphCtx.stroke();
+    }
+
+    // Draw nodes
+    for (var ni = 0; ni < graphNodes.length; ni++) {
+        var n = graphNodes[ni];
+        graphCtx.beginPath();
+        graphCtx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+        graphCtx.fillStyle = n.color;
+        graphCtx.fill();
+        graphCtx.strokeStyle = '#1a1a3a';
+        graphCtx.lineWidth = 1.5;
+        graphCtx.stroke();
+
+        // Label
+        graphCtx.fillStyle = '#e0e0e0';
+        graphCtx.font = '10px monospace';
+        graphCtx.textAlign = 'center';
+        graphCtx.fillText('#' + n.segId, n.x, n.y - n.radius - 4);
+    }
+}
+
+function stopGraphRenderLoop() {
+    if (graphAnimFrame) {
+        cancelAnimationFrame(graphAnimFrame);
+        graphAnimFrame = null;
+    }
+}
+
+function graphNodeAt(mx, my) {
+    // Check in reverse order (topmost first)
+    for (var i = graphNodes.length - 1; i >= 0; i--) {
+        var n = graphNodes[i];
+        var dx = mx - n.x, dy = my - n.y;
+        if (dx * dx + dy * dy <= (n.radius + 4) * (n.radius + 4)) return n;
+    }
+    return null;
+}
+
+function graphEdgeAt(mx, my) {
+    var bestDist = 12; // threshold in pixels
+    var bestIdx = -1;
+    for (var ei = 0; ei < graphEdgeList.length; ei++) {
+        var ge = graphEdgeList[ei];
+        var nA = graphNodes[ge.source];
+        var nB = graphNodes[ge.target];
+        var d = pointToSegmentDist(mx, my, nA.x, nA.y, nB.x, nB.y);
+        if (d < bestDist) {
+            bestDist = d;
+            bestIdx = ei;
+        }
+    }
+    return bestIdx;
+}
+
+function pointToSegmentDist(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx * dx + dy * dy;
+    if (len2 === 0) return Math.sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+    var t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    var projX = ax + t * dx, projY = ay + t * dy;
+    return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
+}
+
+function setupGraphInteraction() {
+    var tooltip = document.getElementById('graph-tooltip');
+    var dragging = false;
+
+    graphCanvas.addEventListener('mousedown', function(e) {
+        var rect = graphCanvas.getBoundingClientRect();
+        var mx = e.clientX - rect.left;
+        var my = e.clientY - rect.top;
+        var node = graphNodeAt(mx, my);
+        if (node) {
+            graphDragNode = node;
+            dragging = true;
+            graphCanvas.style.cursor = 'grabbing';
+            e.preventDefault();
+        }
+    });
+
+    graphCanvas.addEventListener('mousemove', function(e) {
+        var rect = graphCanvas.getBoundingClientRect();
+        var mx = e.clientX - rect.left;
+        var my = e.clientY - rect.top;
+
+        if (dragging && graphDragNode) {
+            graphDragNode.x = mx;
+            graphDragNode.y = my;
+            renderGraph();
+            return;
+        }
+
+        // Hover tooltip
+        var node = graphNodeAt(mx, my);
+        if (node) {
+            var seg = segmentMap[node.segId];
+            tooltip.textContent = '#' + node.segId + ' ' + (seg ? seg.label : '?') + ' (' + node.nPoints + ' pts)';
+            tooltip.style.left = (e.clientX + 12) + 'px';
+            tooltip.style.top = (e.clientY - 8) + 'px';
+            tooltip.style.display = 'block';
+            graphCanvas.style.cursor = 'pointer';
+        } else {
+            tooltip.style.display = 'none';
+            graphCanvas.style.cursor = 'default';
+        }
+    });
+
+    graphCanvas.addEventListener('mouseup', function(e) {
+        if (dragging) {
+            dragging = false;
+            graphDragNode = null;
+            graphCanvas.style.cursor = 'default';
+            return;
+        }
+    });
+
+    graphCanvas.addEventListener('click', function(e) {
+        if (dragging) return;
+        var rect = graphCanvas.getBoundingClientRect();
+        var mx = e.clientX - rect.left;
+        var my = e.clientY - rect.top;
+
+        // Click on node → highlight segment in 3D + fly camera
+        var node = graphNodeAt(mx, my);
+        if (node) {
+            var seg = segmentMap[node.segId];
+            if (seg) {
+                resetAllSegmentColors();
+                // Highlight clicked segment
+                var cloud = segmentClouds[node.segId];
+                if (cloud) {
+                    // Dim all
+                    for (var si = 0; si < allSegments.length; si++) {
+                        var c = segmentClouds[allSegments[si].id];
+                        if (c) c.material.opacity = 0.12;
+                    }
+                    cloud.material.opacity = 1.0;
+                    var arr = cloud.geometry.attributes.color.array;
+                    for (var i = 0; i < arr.length; i += 3) { arr[i] = 1; arr[i+1] = 1; arr[i+2] = 0.3; }
+                    cloud.geometry.attributes.color.needsUpdate = true;
+                }
+                // Fly camera to segment
+                var d = Math.max(seg.extent * 2.5, 1.0);
+                var look = new THREE.Vector3(seg.center[0], seg.center[1], seg.center[2]);
+                var pos = new THREE.Vector3(seg.center[0] + d * 0.5, seg.center[1] + d * 0.4, seg.center[2] + d * 0.5);
+                animateCamera(pos, look);
+            }
+            renderGraph();
+            return;
+        }
+
+        // Click on edge → select it in sidebar
+        var geIdx = graphEdgeAt(mx, my);
+        if (geIdx >= 0) {
+            var edge = allEdges[graphEdgeList[geIdx].edgeIdx];
+            // Find in displayEdges
+            for (var di = 0; di < displayEdges.length; di++) {
+                if (displayEdges[di].source === edge.source && displayEdges[di].target === edge.target) {
+                    selectEdge(di);
+                    renderGraph();
+                    return;
+                }
+            }
+        }
+    });
+
+    graphCanvas.addEventListener('mouseleave', function() {
+        tooltip.style.display = 'none';
+    });
+}
+
+// ── Create Edge Mode ──
+var createMode = false;
+var createSource = null;
+var createTarget = null;
+var raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 0.15;
+
+function toggleCreateMode() {
+    if (createMode) {
+        cancelCreateMode();
+    } else {
+        enterCreateMode();
+    }
+}
+
+function enterCreateMode() {
+    createMode = true;
+    createSource = null;
+    createTarget = null;
+    clearHighlight();
+    // Color each segment with a unique hue so they're visually distinct
+    for (var si = 0; si < allSegments.length; si++) {
+        var seg = allSegments[si];
+        var cloud = segmentClouds[seg.id];
+        if (!cloud) continue;
+        var rgb = hueToRgb((seg.id * GOLDEN_RATIO) % 1.0);
+        var arr = cloud.geometry.attributes.color.array;
+        for (var i = 0; i < arr.length; i += 3) {
+            arr[i] = rgb[0]; arr[i+1] = rgb[1]; arr[i+2] = rgb[2];
+        }
+        cloud.geometry.attributes.color.needsUpdate = true;
+        cloud.material.opacity = 0.8;
+    }
+    document.getElementById('btn-create').classList.add('active');
+    document.getElementById('create-panel').style.display = 'block';
+    document.getElementById('edge-panel').style.display = 'none';
+    updateCreatePanel();
+}
+
+function cancelCreateMode() {
+    createMode = false;
+    createSource = null;
+    createTarget = null;
+    resetAllSegmentColors();
+    document.getElementById('btn-create').classList.remove('active');
+    document.getElementById('create-panel').style.display = 'none';
+}
+
+function updateCreatePanel() {
+    var srcEl = document.getElementById('cp-source');
+    var tgtEl = document.getElementById('cp-target');
+    var hint = document.getElementById('cp-hint');
+    var btn = document.getElementById('btn-create-confirm');
+
+    if (createSource === null) {
+        srcEl.textContent = '—';
+        tgtEl.textContent = '—';
+        hint.textContent = 'Ctrl+Click a segment to select source';
+        btn.disabled = true;
+    } else if (createTarget === null) {
+        var srcSeg = segmentMap[createSource];
+        var srcLabel = srcSeg ? srcSeg.label : '?';
+        srcEl.textContent = '#' + createSource + ' (' + srcLabel + ')';
+        tgtEl.textContent = '—';
+        hint.textContent = 'Ctrl+Click another segment to select target';
+        btn.disabled = true;
+    } else {
+        var srcSeg2 = segmentMap[createSource];
+        var tgtSeg2 = segmentMap[createTarget];
+        srcEl.textContent = '#' + createSource + ' (' + (srcSeg2 ? srcSeg2.label : '?') + ')';
+        tgtEl.textContent = '#' + createTarget + ' (' + (tgtSeg2 ? tgtSeg2.label : '?') + ')';
+        hint.textContent = '';
+        btn.disabled = false;
+    }
+}
+
+function pickSegment(event) {
+    var rect = container.getBoundingClientRect();
+    var splitRight = showMesh || showGraph;
+    var pcW = splitRight ? Math.floor(rect.width / 2) : rect.width;
+    var mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / pcW) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    // Only pick within the point cloud panel
+    if (event.clientX - rect.left > pcW) return null;
+
+    raycaster.setFromCamera(mouse, camera);
+    var clouds = [];
+    for (var si = 0; si < allSegments.length; si++) {
+        var cloud = segmentClouds[allSegments[si].id];
+        if (cloud) clouds.push(cloud);
+    }
+    var hits = raycaster.intersectObjects(clouds);
+    if (hits.length > 0) {
+        return hits[0].object.userData.segId;
+    }
+    return null;
+}
+
+// Drag guard: don't trigger click actions when orbiting
+var mouseDownPos = null;
+document.addEventListener('mousedown', function(e) {
+    mouseDownPos = { x: e.clientX, y: e.clientY };
+}, true);
+function wasDrag(e) {
+    if (!mouseDownPos) return false;
+    var dx = e.clientX - mouseDownPos.x, dy = e.clientY - mouseDownPos.y;
+    return (dx * dx + dy * dy) > 25; // 5px threshold
+}
+
+container.addEventListener('click', function(e) {
+    if (wasDrag(e)) return;
+
+    // In create mode, Ctrl+Click picks segments
+    if (createMode && e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+    } else if (!createMode && !e.ctrlKey && !e.shiftKey) {
+        // Normal click: highlight segment and its neighbors
+        var segId = pickSegment(e);
+        if (segId !== null) {
+            highlightSegmentNeighbors(segId);
+            if (showGraph) renderGraph();
+        }
+        return;
+    } else {
+        return;
+    }
+
+    var segId = pickSegment(e);
+    if (segId === null) return;
+
+    if (createSource === null) {
+        createSource = segId;
+        // Highlight source green
+        var srcCloud = segmentClouds[segId];
+        if (srcCloud) {
+            var arr = srcCloud.geometry.attributes.color.array;
+            for (var i = 0; i < arr.length; i += 3) { arr[i] = 0.3; arr[i+1] = 0.9; arr[i+2] = 0.5; }
+            srcCloud.geometry.attributes.color.needsUpdate = true;
+            srcCloud.material.opacity = 1.0;
+        }
+    } else if (createTarget === null) {
+        if (segId === createSource) return; // can't self-connect
+        createTarget = segId;
+        // Highlight target blue
+        var tgtCloud = segmentClouds[segId];
+        if (tgtCloud) {
+            var arr = tgtCloud.geometry.attributes.color.array;
+            for (var i = 0; i < arr.length; i += 3) { arr[i] = 0.4; arr[i+1] = 0.6; arr[i+2] = 1.0; }
+            tgtCloud.geometry.attributes.color.needsUpdate = true;
+            tgtCloud.material.opacity = 1.0;
+        }
+    }
+    updateCreatePanel();
+});
+
+function confirmCreateEdge() {
+    if (createSource === null || createTarget === null) return;
+    var btn = document.getElementById('btn-create-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+
+    fetch('/add-edge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: createSource, target: createTarget }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            var edge = data.edge;
+            edge._index = allEdges.length;
+            allEdges.push(edge);
+            computeDisplayEdges();
+            buildEdgeList();
+            buildEdgeLines();
+            buildEdgeTubes();
+            buildNeighborMap();
+            updateFilterCounts();
+            updateNavCounter();
+            if (showGraph) { buildGraphData(); runForceLayout(); }
+            cancelCreateMode();
+        } else {
+            alert('Failed: ' + (data.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Create';
+        }
+    })
+    .catch(function(err) {
+        alert('Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Create';
+    });
+}
+
+// ── Save / Export ──
+function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveSession, 500);
+}
+
+function saveSession() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    session.current_edge_index = currentEdgeIdx;
+    fetch('/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(session),
+    }).then(function() {
+        var el = document.getElementById('save-indicator');
+        el.textContent = 'Saved ' + new Date().toLocaleTimeString();
+        setTimeout(function() { el.textContent = ''; }, 3000);
+    });
+}
+
+function doExport() {
+    if (session.reviewed.length === 0) {
+        alert('No edges reviewed yet.');
+        return;
+    }
+    saveSession();
+    setTimeout(function() {
+        fetch('/export-graph', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    var s = data.summary;
+                    alert('Exported: ' + s.accepted + ' accepted, ' +
+                        s.rejected + ' rejected, ' + s.pending + ' pending');
+                }
+            });
+    }, 600);
+}
+
+// ── Keyboard ──
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        if (createMode) cancelCreateMode();
+        else clearHighlight();
+    }
+    else if (createMode) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); confirmCreateEdge(); }
+        return; // don't process review keys while in create mode
+    }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); stepEdge(1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); stepEdge(-1); }
+    else if (e.key === 'a' || e.key === 'A' || e.key === '1') { reviewEdge('accept'); }
+    else if (e.key === 'r' || e.key === 'R' || e.key === '2') { reviewEdge('reject'); }
+    else if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) { reviewEdge('skip'); }
+    else if (e.key === '3') { reviewEdge('skip'); }
+    else if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveSession(); }
+    else if (e.key === 'c' || e.key === 'C') { toggleCreateMode(); }
+    else if (e.key === 'g' || e.key === 'G') {
+        var chk = document.getElementById('chk-graph');
+        chk.checked = !chk.checked;
+        toggleGraph();
+    }
+    else if (e.key === 'f' || e.key === 'F') {
+        if (filter === 'pending') setFilter('all');
+        else setFilter('pending');
+    }
+});
+
+// ── Render Loop ──
+function animate() {
+    requestAnimationFrame(animate);
+    updateCameraAnim();
+    controls.update();
+    renderer.render(scene, camera);
+    if (meshRenderer && showMesh) meshRenderer.render(meshScene, camera);
+}
+
+// ── Init ──
+fetch('/graph-data')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        allSegments = data.segments;
+        contextData = data.context;
+        sceneCenter = data.scene_center;
+        sceneExtent = data.scene_extent;
+        graphMethod = data.graph_method || 'proximity';
+
+        if (data.has_mesh) {
+            hasMesh = true;
+            document.getElementById('lbl-mesh').style.display = '';
+        }
+
+        // Build segment lookup
+        for (var si = 0; si < allSegments.length; si++) {
+            segmentMap[allSegments[si].id] = allSegments[si];
+        }
+
+        // Process edges
+        allEdges = [];
+        for (var ei = 0; ei < data.edges.length; ei++) {
+            var e = data.edges[ei];
+            e._index = ei;
+            allEdges.push(e);
+        }
+
+        // Load session
+        if (data.session) {
+            session = data.session;
+            if (!session.reviewed) session.reviewed = [];
+            // Rebuild review map
+            for (var ri = 0; ri < session.reviewed.length; ri++) {
+                var rv = session.reviewed[ri];
+                reviewMap[edgeKey(rv.source, rv.target)] = rv.action;
+            }
+        }
+
+        resizeRenderer();
+        controls.target.set(sceneCenter[0], sceneCenter[1], sceneCenter[2]);
+        var dist = sceneExtent * 0.9;
+        camera.position.set(
+            sceneCenter[0] + dist * 0.6,
+            sceneCenter[1] + dist * 0.4,
+            sceneCenter[2] + dist * 0.6
+        );
+
+        buildContextCloud();
+        buildScene();
+        buildEdgeLines();
+        buildEdgeTubes();
+        buildNeighborMap();
+
+        computeDisplayEdges();
+        buildEdgeList();
+        updateFilterCounts();
+        updateNavCounter();
+
+        // Resume position
+        if (session.current_edge_index >= 0 && session.current_edge_index < displayEdges.length) {
+            selectEdge(session.current_edge_index);
+        }
+
+        document.getElementById('loading').classList.add('hidden');
+        animate();
+    });
+
+</script>
+</body>
+</html>

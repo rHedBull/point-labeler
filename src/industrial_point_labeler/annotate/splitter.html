@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Annotation Tool — Split</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; display: flex; height: 100vh; overflow: hidden; }
+
+#viewer-container { flex: 1; position: relative; }
+canvas { display: block; }
+
+#toolbar { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; z-index: 10; flex-wrap: wrap; max-width: 700px; }
+#toolbar button { padding: 5px 10px; background: #0f3460; border: 1px solid #555; color: #fff; cursor: pointer; border-radius: 4px; font-family: monospace; font-size: 11px; }
+#toolbar button.active { background: #e94560; border-color: #e94560; }
+#toolbar button:hover { background: #1a3a5c; }
+#toolbar .sep { width: 1px; background: #444; margin: 0 2px; }
+
+#right-panel { width: 280px; background: #16213e; border-left: 1px solid #333; display: flex; flex-direction: column; flex-shrink: 0; }
+#groups-header { padding: 10px 12px; font-size: 13px; font-weight: bold; border-bottom: 1px solid #333; background: #0f3460; }
+#groups-container { flex: 1; overflow-y: auto; padding: 8px; }
+.group-card { background: #1a2a4a; border-radius: 6px; padding: 10px; margin-bottom: 8px; border-left: 4px solid #888; cursor: pointer; transition: background 0.15s; }
+.group-card:hover { background: #1f3460; }
+.group-card.active-group { background: #1a3a6a; outline: 2px solid #e94560; }
+.group-card.hidden-group { opacity: 0.5; }
+.group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.group-name { font-weight: bold; font-size: 12px; }
+.group-count { font-size: 11px; color: #999; }
+.group-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.group-actions button { padding: 2px 8px; background: #0f3460; border: 1px solid #444; color: #ccc; cursor: pointer; border-radius: 3px; font-size: 10px; font-family: monospace; }
+.group-actions button:hover { background: #1a3a5c; }
+.group-actions button.danger:hover { background: #8b0000; }
+.group-actions button.active-toggle { background: #6b3a1b; border-color: #8a5a2a; }
+
+#add-group-btn { width: 100%; padding: 8px; background: #0f3460; border: 1px solid #555; color: #fff; cursor: pointer; border-radius: 4px; font-family: monospace; font-size: 12px; margin-top: 4px; }
+#add-group-btn:hover { background: #1a3a5c; }
+#save-section { padding: 8px; border-top: 1px solid #333; }
+#save-section button { width: 100%; padding: 8px; background: #1b6b3a; border: 1px solid #2a8a4a; color: #fff; cursor: pointer; border-radius: 4px; font-family: monospace; font-size: 12px; font-weight: bold; }
+#save-section button:hover { background: #2a8a4a; }
+
+#help-bar { position: absolute; bottom: 10px; left: 10px; background: rgba(15,52,96,0.9); padding: 8px 12px; border-radius: 6px; font-size: 10px; z-index: 10; color: #aaa; max-width: 600px; line-height: 1.8; }
+#status-bar { position: absolute; top: 10px; right: 290px; background: rgba(15,52,96,0.9); padding: 8px 12px; border-radius: 6px; font-size: 11px; z-index: 10; min-width: 180px; }
+</style>
+</head>
+<body>
+<div id="viewer-container">
+    <div id="toolbar">
+        <button id="btn-orbit" class="active" onclick="setMode('orbit')">Orbit</button>
+        <button id="btn-draw" onclick="setMode('draw')">Draw Box</button>
+        <div class="sep"></div>
+        <button id="btn-original" class="active" onclick="setColorMode('original')">Original</button>
+        <button id="btn-groups" onclick="setColorMode('groups')">Groups</button>
+        <div class="sep"></div>
+        <button onclick="changePointSize(-1)">Pt-</button>
+        <button onclick="changePointSize(1)">Pt+</button>
+    </div>
+    <div id="status-bar"></div>
+    <div id="help-bar">
+        <b>Orbit mode:</b> left-drag rotate, scroll zoom, right-drag pan<br>
+        <b>Draw Box mode (B):</b> click+drag to draw selection box on screen &nbsp;
+        <b>Esc</b> back to orbit<br>
+        <b>After drawing:</b> drag corners to resize, drag body to move &nbsp;
+        <b>WASD</b> move box (screen-relative) &nbsp; <b>Q/E</b> rotate box<br>
+        <b>Shift+scroll</b> adjust depth &nbsp; <b>Z/X</b> shrink/grow &nbsp;
+        <b>Enter</b> assign to group &nbsp;
+        <b>Delete</b> remove box<br>
+        <b>N</b> new group &nbsp;
+        <b>1-9</b> switch group &nbsp;
+        <b>H</b> hide group
+    </div>
+</div>
+<div id="right-panel">
+    <div id="groups-header">Groups</div>
+    <div id="groups-container"></div>
+    <button id="add-group-btn" onclick="addGroup()">+ New Group (N)</button>
+    <div id="save-section">
+        <button onclick="saveSplits()">Apply Split</button>
+    </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ── Constants ── */
+const GROUP_COLORS = [
+    [1.0, 0.4, 0.4], [0.4, 0.8, 1.0], [1.0, 0.85, 0.3],
+    [0.5, 1.0, 0.5], [1.0, 0.5, 1.0], [1.0, 0.65, 0.3],
+    [0.6, 0.6, 1.0], [0.3, 1.0, 0.85], [0.9, 0.9, 0.9],
+];
+const HANDLE_SIZE = 0.015;
+const HANDLE_COLOR = 0xff4444;
+const HANDLE_HOVER_COLOR = 0xffff00;
+const BOX_COLOR = 0xffee00;
+
+// OBB corner sign patterns: index → [sx, sy, sz] where -1=min, +1=max
+const CORNER_SIGNS = [
+    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
+    [-1,-1,1],  [1,-1,1],  [1,1,1],  [-1,1,1]
+];
+// Opposite corner lookup (all signs flipped)
+const OPPOSITE_CORNER = [6, 7, 4, 5, 2, 3, 0, 1];
+
+/* ── URL params ── */
+const params = new URLSearchParams(window.location.search);
+const segmentIds = params.get('segments');
+
+/* ── State ── */
+let scene, camera, renderer, controls, pointCloud;
+let colorMode = 'original', pointSize = 4;
+let positions = null, origColors = null, nPoints = 0;
+let segmentIdArray = null;  // per-point segment IDs from server
+let selectedPoints = new Set();
+let groups = [], activeGroupIdx = 0, pointGroup = null;
+
+// Interaction mode: 'orbit' | 'draw'
+let mode = 'orbit';
+
+// Selection box — Oriented Bounding Box (OBB)
+let boxCenter = new THREE.Vector3();
+let boxHalfExtents = new THREE.Vector3();
+let boxQuat = new THREE.Quaternion(); // rotation from local to world
+let boxExists = false;
+let boxWireframe = null;
+let handleMeshes = [];
+let raycaster = new THREE.Raycaster();
+raycaster.params.Points = { threshold: 0.02 };
+
+// Drag state
+let drag = null;
+let keysDown = {};
+
+/* ── OBB helpers ── */
+function getBoxCorners() {
+    return CORNER_SIGNS.map(function(s) {
+        var local = new THREE.Vector3(s[0]*boxHalfExtents.x, s[1]*boxHalfExtents.y, s[2]*boxHalfExtents.z);
+        local.applyQuaternion(boxQuat);
+        return local.add(boxCenter);
+    });
+}
+
+function isPointInOBB(x, y, z) {
+    var dx = x - boxCenter.x, dy = y - boxCenter.y, dz = z - boxCenter.z;
+    var local = new THREE.Vector3(dx, dy, dz);
+    local.applyQuaternion(_invQuat);
+    return Math.abs(local.x) <= boxHalfExtents.x &&
+           Math.abs(local.y) <= boxHalfExtents.y &&
+           Math.abs(local.z) <= boxHalfExtents.z;
+}
+
+// Cached inverse quaternion — update whenever boxQuat changes
+var _invQuat = new THREE.Quaternion();
+function updateInvQuat() { _invQuat.copy(boxQuat).invert(); }
+
+/* ── Three.js setup ── */
+function init() {
+    const container = document.getElementById('viewer-container');
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+    camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.01, 100);
+    camera.position.set(0, 0, 3);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    window.addEventListener('resize', function() {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+    animate();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    processKeys();
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+/* ── WASD/QE box movement & rotation (camera-relative) ── */
+function processKeys() {
+    if (!boxExists || drag) return;
+    var moved = false;
+    var speed = Math.max(0.002, boxHalfExtents.length() * 0.04);
+
+    // Camera-relative directions
+    var forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    var right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+    var up = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+    var delta = new THREE.Vector3();
+    // WASD = screen-relative: W=up, S=down, A=left, D=right
+    if (keysDown['w']) { delta.addScaledVector(up, speed); moved = true; }
+    if (keysDown['s']) { delta.addScaledVector(up, -speed); moved = true; }
+    if (keysDown['a']) { delta.addScaledVector(right, -speed); moved = true; }
+    if (keysDown['d']) { delta.addScaledVector(right, speed); moved = true; }
+
+    // Q/E = rotate box around camera forward axis
+    var rotSpeed = 0.02;
+    if (keysDown['q']) {
+        var rotQ = new THREE.Quaternion().setFromAxisAngle(forward, rotSpeed);
+        boxQuat.premultiply(rotQ);
+        updateInvQuat();
+        moved = true;
+    }
+    if (keysDown['e']) {
+        var rotQ = new THREE.Quaternion().setFromAxisAngle(forward, -rotSpeed);
+        boxQuat.premultiply(rotQ);
+        updateInvQuat();
+        moved = true;
+    }
+
+    if (moved) {
+        boxCenter.add(delta);
+        updateBoxVisuals();
+        selectPointsInBox();
+    }
+}
+
+/* ── Selection Box Rendering ── */
+function updateBoxVisuals() {
+    if (boxWireframe) { scene.remove(boxWireframe); boxWireframe.geometry.dispose(); boxWireframe.material.dispose(); boxWireframe = null; }
+    handleMeshes.forEach(function(h) { scene.remove(h); h.geometry.dispose(); h.material.dispose(); });
+    handleMeshes = [];
+
+    if (!boxExists) return;
+
+    var corners = getBoxCorners();
+    var edgeIndices = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+    var linePos = new Float32Array(edgeIndices.length * 3);
+    for (var i = 0; i < edgeIndices.length; i++) {
+        var c = corners[edgeIndices[i]];
+        linePos[i*3] = c.x; linePos[i*3+1] = c.y; linePos[i*3+2] = c.z;
+    }
+    var lineGeom = new THREE.BufferGeometry();
+    lineGeom.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+    boxWireframe = new THREE.LineSegments(lineGeom, new THREE.LineBasicMaterial({ color: BOX_COLOR, linewidth: 2, depthTest: false, transparent: true, opacity: 0.8 }));
+    boxWireframe.renderOrder = 999;
+    scene.add(boxWireframe);
+
+    var hSize = Math.max(HANDLE_SIZE, boxHalfExtents.length() * 0.05);
+    var handleGeom = new THREE.SphereGeometry(hSize, 8, 8);
+    corners.forEach(function(c, idx) {
+        var mat = new THREE.MeshBasicMaterial({ color: HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.9 });
+        var mesh = new THREE.Mesh(handleGeom, mat);
+        mesh.position.copy(c);
+        mesh.renderOrder = 1000;
+        mesh.userData.handleIdx = idx;
+        scene.add(mesh);
+        handleMeshes.push(mesh);
+    });
+}
+
+function selectPointsInBox() {
+    selectedPoints.clear();
+    if (!boxExists || nPoints === 0) { refreshColors(); updateStatus(); return; }
+
+    // Precompute inverse rotation matrix for fast per-point OBB test
+    var m = new THREE.Matrix4().makeRotationFromQuaternion(_invQuat);
+    var me = m.elements;
+    var m00 = me[0], m01 = me[4], m02 = me[8];
+    var m10 = me[1], m11 = me[5], m12 = me[9];
+    var m20 = me[2], m21 = me[6], m22 = me[10];
+    var hx = boxHalfExtents.x, hy = boxHalfExtents.y, hz = boxHalfExtents.z;
+    var cx = boxCenter.x, cy = boxCenter.y, cz = boxCenter.z;
+
+    for (var i = 0; i < nPoints; i++) {
+        var gi = pointGroup[i];
+        if (gi >= 0 && gi < groups.length && groups[gi].hidden) continue;
+        var dx = positions[i*3] - cx, dy = positions[i*3+1] - cy, dz = positions[i*3+2] - cz;
+        var lx = m00*dx + m01*dy + m02*dz;
+        if (lx < -hx || lx > hx) continue;
+        var ly = m10*dx + m11*dy + m12*dz;
+        if (ly < -hy || ly > hy) continue;
+        var lz = m20*dx + m21*dy + m22*dz;
+        if (lz < -hz || lz > hz) continue;
+        selectedPoints.add(i);
+    }
+    refreshColors();
+    updateStatus();
+}
+
+function removeBox() {
+    boxExists = false;
+    boxQuat.identity();
+    updateInvQuat();
+    updateBoxVisuals();
+    selectedPoints.clear();
+    refreshColors();
+    updateStatus();
+}
+
+/* ── Mouse → World projection ── */
+function getNDC(e) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    return new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+}
+
+function makeRay(ndc) {
+    raycaster.setFromCamera(ndc, camera);
+    return raycaster.ray;
+}
+
+function projectOntoPlane(ndc, plane) {
+    var ray = makeRay(ndc);
+    var target = new THREE.Vector3();
+    ray.intersectPlane(plane, target);
+    return target;
+}
+
+function makeCameraPlane(point) {
+    var normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);
+}
+
+/* ── Drag logic ── */
+function onMouseDown(e) {
+    if (e.button !== 0) return;
+    if (mode === 'orbit') return;
+
+    var ndc = getNDC(e);
+
+    // 1. Check if clicking a handle
+    raycaster.setFromCamera(ndc, camera);
+    var handleHits = raycaster.intersectObjects(handleMeshes);
+    if (handleHits.length > 0 && boxExists) {
+        var hitHandle = handleHits[0].object;
+        var hIdx = hitHandle.userData.handleIdx;
+        var corners = getBoxCorners();
+        var oppositeIdx = OPPOSITE_CORNER[hIdx];
+        var plane = makeCameraPlane(corners[hIdx]);
+        drag = {
+            type: 'corner', handleIdx: hIdx, plane: plane,
+            startWorldPt: projectOntoPlane(ndc, plane),
+            origCornerWorld: corners[hIdx].clone(),
+            fixedCornerWorld: corners[oppositeIdx].clone()
+        };
+        controls.enabled = false;
+        e.preventDefault();
+        return;
+    }
+
+    // 2. Check if clicking inside box (move)
+    if (boxExists) {
+        var plane = makeCameraPlane(boxCenter);
+        var worldPt = projectOntoPlane(ndc, plane);
+        if (worldPt && isPointInOBB(worldPt.x, worldPt.y, worldPt.z)) {
+            drag = {
+                type: 'move', plane: plane,
+                startWorldPt: worldPt.clone(),
+                origCenter: boxCenter.clone()
+            };
+            controls.enabled = false;
+            e.preventDefault();
+            return;
+        }
+    }
+
+    // 3. Draw new box — aligned to camera view
+    var planePoint = controls.target.clone();
+    var plane = makeCameraPlane(planePoint);
+    var worldPt = projectOntoPlane(ndc, plane);
+    if (!worldPt) return;
+
+    // Use camera quaternion directly (proper rotation, always right-handed)
+    // Camera local: X=right, Y=up, Z=back (camera looks along -Z)
+    camera.updateMatrixWorld();
+    var worldQuat = new THREE.Quaternion();
+    camera.getWorldQuaternion(worldQuat);
+    boxQuat.copy(worldQuat);
+    updateInvQuat();
+
+    // Get camera axes from the quaternion
+    var camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
+    var camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
+    var camBack = new THREE.Vector3(0, 0, 1).applyQuaternion(worldQuat); // box local +Z = away from camera
+
+    // Precompute depth range along box local Z (camBack direction)
+    var depthMin = Infinity, depthMax = -Infinity;
+    for (var i = 0; i < nPoints; i++) {
+        var d = positions[i*3]*camBack.x + positions[i*3+1]*camBack.y + positions[i*3+2]*camBack.z;
+        if (d < depthMin) depthMin = d;
+        if (d > depthMax) depthMax = d;
+    }
+
+    drag = {
+        type: 'draw', plane: plane,
+        startWorldPt: worldPt.clone(),
+        camRight: camRight.clone(),
+        camUp: camUp.clone(),
+        camBack: camBack.clone(),
+        depthMin: depthMin, depthMax: depthMax
+    };
+    controls.enabled = false;
+    e.preventDefault();
+}
+
+function onMouseMove(e) {
+    if (!drag) {
+        // Hover highlight on handles
+        if (mode === 'draw' && boxExists) {
+            var ndc = getNDC(e);
+            raycaster.setFromCamera(ndc, camera);
+            var hits = raycaster.intersectObjects(handleMeshes);
+            handleMeshes.forEach(function(h) { h.material.color.setHex(HANDLE_COLOR); });
+            if (hits.length > 0) {
+                hits[0].object.material.color.setHex(HANDLE_HOVER_COLOR);
+                renderer.domElement.style.cursor = 'grab';
+            } else {
+                var plane = makeCameraPlane(boxCenter);
+                var worldPt = projectOntoPlane(ndc, plane);
+                if (worldPt && isPointInOBB(worldPt.x, worldPt.y, worldPt.z)) {
+                    renderer.domElement.style.cursor = 'move';
+                } else {
+                    renderer.domElement.style.cursor = 'crosshair';
+                }
+            }
+        }
+        return;
+    }
+
+    var ndc = getNDC(e);
+    var worldPt = projectOntoPlane(ndc, drag.plane);
+    if (!worldPt) return;
+
+    if (drag.type === 'draw') {
+        var a = drag.startWorldPt, b = worldPt;
+        var R = drag.camRight, U = drag.camUp, B = drag.camBack;
+
+        // Project start/end points onto camera screen axes
+        var aR = a.dot(R), aU = a.dot(U);
+        var bR = b.dot(R), bU = b.dot(U);
+
+        // Half-extents in camera-local space (X=right, Y=up, Z=back/depth)
+        var hx = Math.abs(bR - aR) / 2;
+        var hy = Math.abs(bU - aU) / 2;
+        var hz = (drag.depthMax - drag.depthMin) / 2 + 0.01; // small margin
+
+        // Center in camera-local coordinates → world
+        var cx = (aR + bR) / 2;
+        var cy = (aU + bU) / 2;
+        var cz = (drag.depthMin + drag.depthMax) / 2;
+        boxCenter.set(0, 0, 0);
+        boxCenter.addScaledVector(R, cx);
+        boxCenter.addScaledVector(U, cy);
+        boxCenter.addScaledVector(B, cz);
+        boxHalfExtents.set(hx, hy, hz);
+        boxExists = true;
+        updateBoxVisuals();
+        selectPointsInBox();
+
+    } else if (drag.type === 'corner') {
+        var delta = worldPt.clone().sub(drag.startWorldPt);
+        var draggedCornerWorld = drag.origCornerWorld.clone().add(delta);
+        var fixedCornerWorld = drag.fixedCornerWorld;
+
+        // New center = midpoint of fixed and dragged corners
+        var newCenter = fixedCornerWorld.clone().add(draggedCornerWorld).multiplyScalar(0.5);
+
+        // Compute half-extents in local (rotated) space
+        var diff = draggedCornerWorld.clone().sub(fixedCornerWorld);
+        diff.applyQuaternion(_invQuat);
+        var newHalf = new THREE.Vector3(
+            Math.max(Math.abs(diff.x) / 2, 0.001),
+            Math.max(Math.abs(diff.y) / 2, 0.001),
+            Math.max(Math.abs(diff.z) / 2, 0.001)
+        );
+
+        boxCenter.copy(newCenter);
+        boxHalfExtents.copy(newHalf);
+        updateBoxVisuals();
+        selectPointsInBox();
+
+    } else if (drag.type === 'move') {
+        var delta = worldPt.clone().sub(drag.startWorldPt);
+        boxCenter.copy(drag.origCenter).add(delta);
+        updateBoxVisuals();
+        selectPointsInBox();
+    }
+
+    e.preventDefault();
+}
+
+function onMouseUp(e) {
+    if (!drag) return;
+    controls.enabled = (mode === 'orbit');
+    drag = null;
+    e.preventDefault();
+}
+
+// Shift+scroll to adjust box depth
+function onWheel(e) {
+    if (mode !== 'draw' || !boxExists) return;
+    if (!e.shiftKey) return;
+    e.preventDefault();
+
+    var camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    var amount = e.deltaY > 0 ? 0.02 : -0.02;
+
+    // Shrink/expand along the local axis most aligned with camera direction
+    var localCamDir = camDir.clone().applyQuaternion(_invQuat);
+    var ax = Math.abs(localCamDir.x), ay = Math.abs(localCamDir.y), az = Math.abs(localCamDir.z);
+
+    if (ax > ay && ax > az) {
+        boxHalfExtents.x = Math.max(0.001, boxHalfExtents.x - amount);
+    } else if (ay > az) {
+        boxHalfExtents.y = Math.max(0.001, boxHalfExtents.y - amount);
+    } else {
+        boxHalfExtents.z = Math.max(0.001, boxHalfExtents.z - amount);
+    }
+
+    updateBoxVisuals();
+    selectPointsInBox();
+}
+
+/* ── Mode switching ── */
+function setMode(m) {
+    mode = m;
+    document.getElementById('btn-orbit').classList.toggle('active', m === 'orbit');
+    document.getElementById('btn-draw').classList.toggle('active', m === 'draw');
+    controls.enabled = (m === 'orbit');
+    renderer.domElement.style.cursor = m === 'orbit' ? 'grab' : 'crosshair';
+    if (m === 'orbit' && !boxExists) {
+        selectedPoints.clear();
+        refreshColors();
+        updateStatus();
+    }
+}
+window.setMode = setMode;
+
+/* ── Load and display split data from annotation server ── */
+async function loadSplitData() {
+    if (!segmentIds) {
+        alert('No segments specified. Use ?segments=id1,id2,...');
+        return;
+    }
+
+    var resp = await fetch('/split-data?segments=' + segmentIds);
+    var data = await resp.json();
+
+    nPoints = data.x.length;
+    positions = new Float32Array(nPoints * 3);
+    origColors = new Float32Array(nPoints * 3);
+    segmentIdArray = data.segment_ids;
+
+    for (var i = 0; i < nPoints; i++) {
+        positions[i * 3] = data.x[i];
+        positions[i * 3 + 1] = data.y[i];
+        positions[i * 3 + 2] = data.z[i];
+        origColors[i * 3] = data.r[i] / 255;
+        origColors[i * 3 + 1] = data.g[i] / 255;
+        origColors[i * 3 + 2] = data.b[i] / 255;
+    }
+
+    groups = [];
+    activeGroupIdx = -1;
+    pointGroup = new Int16Array(nPoints).fill(-1);
+    addGroup();
+
+    rebuildPointCloud();
+    if (pointCloud) {
+        pointCloud.geometry.computeBoundingSphere();
+        var c = pointCloud.geometry.boundingSphere.center;
+        var r = pointCloud.geometry.boundingSphere.radius;
+        controls.target.copy(c);
+        camera.position.set(c.x + r * 2, c.y + r * 1.5, c.z + r * 2);
+        controls.update();
+    }
+    renderGroupsPanel();
+    updateStatus();
+}
+
+function rebuildPointCloud() {
+    if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose(); pointCloud.material.dispose(); }
+    var geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(computeDisplayColors(), 3));
+    pointCloud = new THREE.Points(geom, new THREE.PointsMaterial({ size: pointSize * 0.001, vertexColors: true, sizeAttenuation: true }));
+    scene.add(pointCloud);
+}
+
+function computeDisplayColors() {
+    var colors = new Float32Array(nPoints * 3);
+    var hasSel = selectedPoints.size > 0;
+    for (var i = 0; i < nPoints; i++) {
+        var gi = pointGroup[i];
+        if (gi >= 0 && gi < groups.length && groups[gi].hidden) {
+            colors[i*3] = 0.102; colors[i*3+1] = 0.102; colors[i*3+2] = 0.180;
+            continue;
+        }
+        var isSel = selectedPoints.has(i);
+        if (isSel) {
+            colors[i*3] = 1.0; colors[i*3+1] = 0.95; colors[i*3+2] = 0.0;
+        } else if (hasSel) {
+            if (colorMode === 'groups' && gi >= 0) {
+                var gc = GROUP_COLORS[gi % GROUP_COLORS.length];
+                colors[i*3] = gc[0]*0.3; colors[i*3+1] = gc[1]*0.3; colors[i*3+2] = gc[2]*0.3;
+            } else if (colorMode === 'groups') {
+                colors[i*3] = 0.1; colors[i*3+1] = 0.1; colors[i*3+2] = 0.1;
+            } else {
+                colors[i*3] = origColors[i*3]*0.25; colors[i*3+1] = origColors[i*3+1]*0.25; colors[i*3+2] = origColors[i*3+2]*0.25;
+            }
+        } else {
+            if (colorMode === 'groups' && gi >= 0) {
+                var gc = GROUP_COLORS[gi % GROUP_COLORS.length];
+                colors[i*3] = gc[0]; colors[i*3+1] = gc[1]; colors[i*3+2] = gc[2];
+            } else if (colorMode === 'groups') {
+                colors[i*3] = 0.25; colors[i*3+1] = 0.25; colors[i*3+2] = 0.25;
+            } else {
+                colors[i*3] = origColors[i*3]; colors[i*3+1] = origColors[i*3+1]; colors[i*3+2] = origColors[i*3+2];
+            }
+        }
+    }
+    return colors;
+}
+
+function refreshColors() {
+    if (!pointCloud) return;
+    var ca = pointCloud.geometry.getAttribute('color');
+    ca.array.set(computeDisplayColors());
+    ca.needsUpdate = true;
+}
+
+/* ── Groups ── */
+function addGroup() {
+    groups.push({ name: 'Group ' + String.fromCharCode(65 + groups.length), hidden: false, pointIndices: new Set() });
+    activeGroupIdx = groups.length - 1;
+    renderGroupsPanel();
+    updateStatus();
+}
+window.addGroup = addGroup;
+
+function removeGroup(idx) {
+    for (var pi of groups[idx].pointIndices) pointGroup[pi] = -1;
+    groups.splice(idx, 1);
+    for (var i = 0; i < nPoints; i++) { if (pointGroup[i] > idx) pointGroup[i]--; else if (pointGroup[i] === idx) pointGroup[i] = -1; }
+    if (activeGroupIdx >= groups.length) activeGroupIdx = groups.length - 1;
+    if (activeGroupIdx < 0 && groups.length > 0) activeGroupIdx = 0;
+    renderGroupsPanel(); refreshColors(); updateStatus();
+}
+
+function assignSelectionToGroup() {
+    if (activeGroupIdx < 0 || activeGroupIdx >= groups.length || selectedPoints.size === 0) return;
+    for (var pi of selectedPoints) {
+        var prev = pointGroup[pi];
+        if (prev >= 0 && prev < groups.length) groups[prev].pointIndices.delete(pi);
+        pointGroup[pi] = activeGroupIdx;
+        groups[activeGroupIdx].pointIndices.add(pi);
+    }
+    selectedPoints.clear();
+    renderGroupsPanel(); refreshColors(); updateStatus();
+}
+
+function unassignGroup(idx) {
+    for (var pi of groups[idx].pointIndices) pointGroup[pi] = -1;
+    groups[idx].pointIndices.clear();
+    renderGroupsPanel(); refreshColors(); updateStatus();
+}
+
+function toggleHideGroup(idx) {
+    groups[idx].hidden = !groups[idx].hidden;
+    renderGroupsPanel(); refreshColors();
+    if (boxExists) selectPointsInBox();
+}
+
+/* ── Groups panel ── */
+function renderGroupsPanel() {
+    var container = document.getElementById('groups-container');
+    while (container.firstChild) container.removeChild(container.firstChild);
+    groups.forEach(function(g, idx) {
+        var card = document.createElement('div');
+        card.className = 'group-card' + (idx === activeGroupIdx ? ' active-group' : '') + (g.hidden ? ' hidden-group' : '');
+        var gc = GROUP_COLORS[idx % GROUP_COLORS.length];
+        card.style.borderLeftColor = 'rgb(' + Math.round(gc[0]*255) + ',' + Math.round(gc[1]*255) + ',' + Math.round(gc[2]*255) + ')';
+
+        var header = document.createElement('div'); header.className = 'group-header';
+        var nm = document.createElement('span'); nm.className = 'group-name';
+        nm.textContent = g.name + (g.hidden ? ' (hidden)' : '');
+        header.appendChild(nm);
+        var ct = document.createElement('span'); ct.className = 'group-count'; ct.textContent = g.pointIndices.size + ' pts';
+        header.appendChild(ct);
+        card.appendChild(header);
+
+        var actions = document.createElement('div'); actions.className = 'group-actions';
+        var bh = document.createElement('button'); bh.textContent = g.hidden ? 'Show' : 'Hide';
+        if (g.hidden) bh.classList.add('active-toggle');
+        bh.addEventListener('click', function(e) { e.stopPropagation(); toggleHideGroup(idx); });
+        actions.appendChild(bh);
+        var bc = document.createElement('button'); bc.textContent = 'Clear';
+        bc.addEventListener('click', function(e) { e.stopPropagation(); unassignGroup(idx); });
+        actions.appendChild(bc);
+        if (groups.length > 1) {
+            var bd = document.createElement('button'); bd.textContent = 'Delete'; bd.className = 'danger';
+            bd.addEventListener('click', function(e) { e.stopPropagation(); removeGroup(idx); });
+            actions.appendChild(bd);
+        }
+        card.appendChild(actions);
+        card.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+            activeGroupIdx = idx; renderGroupsPanel(); updateStatus();
+        });
+        container.appendChild(card);
+    });
+}
+
+/* ── Status ── */
+function updateStatus() {
+    var bar = document.getElementById('status-bar');
+    if (nPoints === 0) { bar.textContent = ''; return; }
+    var assigned = 0;
+    for (var i = 0; i < nPoints; i++) if (pointGroup[i] >= 0) assigned++;
+    bar.textContent = '';
+    var lines = [
+        'Segments: ' + segmentIds + ' | ' + nPoints + ' pts',
+        'In box: ' + selectedPoints.size,
+        'Assigned: ' + assigned + '/' + nPoints
+    ];
+    if (activeGroupIdx >= 0 && activeGroupIdx < groups.length) lines.push('Active: ' + groups[activeGroupIdx].name);
+    lines.forEach(function(l) { var d = document.createElement('div'); d.textContent = l; bar.appendChild(d); });
+}
+
+/* ── Color / size ── */
+window.setColorMode = function(m) {
+    colorMode = m;
+    document.getElementById('btn-original').classList.toggle('active', m === 'original');
+    document.getElementById('btn-groups').classList.toggle('active', m === 'groups');
+    refreshColors();
+};
+window.changePointSize = function(delta) {
+    pointSize = Math.max(1, Math.min(20, pointSize + delta));
+    if (pointCloud) pointCloud.material.size = pointSize * 0.001;
+};
+
+/* ── Build group assignments for save ── */
+function buildGroupAssignments() {
+    // Returns array of arrays: each group maps to the point indices assigned to it
+    return groups.map(function(g) {
+        return Array.from(g.pointIndices);
+    });
+}
+
+/* ── Save / apply split ── */
+window.saveSplits = async function() {
+    var result = {
+        original_segment_ids: segmentIds,
+        groups: buildGroupAssignments(),
+    };
+    try {
+        var resp = await fetch('/apply-split', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(result),
+        });
+        var data = await resp.json();
+        if (data.ok) {
+            alert('Split applied. Close this tab and click Refresh in the main tool.');
+            window.close();
+        } else {
+            alert('Split failed: ' + (data.error || 'unknown error'));
+        }
+    } catch (err) {
+        alert('Split error: ' + err.message);
+    }
+};
+
+/* ── Keyboard ── */
+var MOVE_KEYS = ['w','a','s','d','q','e'];
+
+document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    var k = e.key.toLowerCase();
+    keysDown[k] = true;
+
+    // WASD/QE are for box movement/rotation — don't trigger other shortcuts
+    if (MOVE_KEYS.indexOf(k) >= 0) {
+        if (boxExists) e.preventDefault();
+        return;
+    }
+
+    switch (k) {
+        case 'b': setMode(mode === 'draw' ? 'orbit' : 'draw'); break;
+        case 'escape': setMode('orbit'); break;
+        case 'enter': assignSelectionToGroup(); break;
+        case 'n': addGroup(); break;
+        case 'g': window.setColorMode('groups'); break;
+        case 'o': window.setColorMode('original'); break;
+        case 'h': if (activeGroupIdx >= 0 && activeGroupIdx < groups.length) toggleHideGroup(activeGroupIdx); break;
+        case 'delete': case 'backspace': removeBox(); break;
+        case 'z':
+            if (boxExists) {
+                boxHalfExtents.multiplyScalar(0.9);
+                boxHalfExtents.x = Math.max(0.001, boxHalfExtents.x);
+                boxHalfExtents.y = Math.max(0.001, boxHalfExtents.y);
+                boxHalfExtents.z = Math.max(0.001, boxHalfExtents.z);
+                updateBoxVisuals(); selectPointsInBox();
+            }
+            break;
+        case 'x':
+            if (boxExists) {
+                boxHalfExtents.multiplyScalar(1.12);
+                updateBoxVisuals(); selectPointsInBox();
+            }
+            break;
+    }
+    var num = parseInt(e.key);
+    if (num >= 1 && num <= 9 && num <= groups.length) { activeGroupIdx = num - 1; renderGroupsPanel(); updateStatus(); }
+});
+
+document.addEventListener('keyup', function(e) {
+    keysDown[e.key.toLowerCase()] = false;
+});
+
+/* ── Init ── */
+init();
+updateInvQuat();
+var el = renderer.domElement;
+el.addEventListener('mousedown', onMouseDown);
+el.addEventListener('mousemove', onMouseMove);
+el.addEventListener('mouseup', onMouseUp);
+el.addEventListener('wheel', onWheel, { passive: false });
+loadSplitData();
+</script>
+</body>
+</html>
