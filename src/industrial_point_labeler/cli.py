@@ -6,10 +6,7 @@ import sys
 def main():
     commands = {
         "segment": ("industrial_point_labeler.segmentation.ransac", "RANSAC primitive segmentation"),
-        "label": ("industrial_point_labeler.labeler.server", "Interactive GT annotation tool"),
-        "doubles": ("industrial_point_labeler.doubles.server", "Doubles dissection tool"),
-        "build-graph": ("industrial_point_labeler.graph.builder", "Build pipe-endpoint connectivity graph"),
-        "review-graph": ("industrial_point_labeler.graph.server", "Interactive graph review tool"),
+        "annotate": ("industrial_point_labeler.annotate.server", "Interactive annotation tool"),
         "describe-equipment": ("industrial_point_labeler.equipment.server", "Equipment description tool"),
     }
 
