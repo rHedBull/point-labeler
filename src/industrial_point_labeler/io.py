@@ -7,11 +7,15 @@ from plyfile import PlyData
 
 
 def load_ply(path):
-    """Load PLY file, return (xyz, rgb) arrays."""
+    """Load PLY file, return (xyz, rgb) arrays. RGB defaults to gray if missing."""
     ply = PlyData.read(str(path))
     v = ply["vertex"]
     xyz = np.column_stack([v["x"], v["y"], v["z"]])
-    rgb = np.column_stack([v["red"], v["green"], v["blue"]])
+    names = {p.name for p in v.properties}
+    if {"red", "green", "blue"} <= names:
+        rgb = np.column_stack([v["red"], v["green"], v["blue"]])
+    else:
+        rgb = np.full((len(v.data), 3), 180, dtype=np.uint8)
     return xyz, rgb
 
 

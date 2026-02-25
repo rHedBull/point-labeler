@@ -78,7 +78,7 @@ def _compute_curvatures_at_scale(points, normals, nn_idx):
 
     # Batched solve
     try:
-        coeffs = np.linalg.solve(AtA, Atw)  # (N, 3) -> [a, b, c] per point
+        coeffs = np.linalg.solve(AtA, Atw[..., np.newaxis]).squeeze(-1)  # (N, 3)
     except np.linalg.LinAlgError:
         # Fallback to per-point solve for numerical issues
         coeffs = np.zeros((n, 3))
@@ -419,7 +419,8 @@ def main():
     print(f"Loading {input_path}...")
     pcd = o3d.io.read_point_cloud(str(input_path))
     points = np.asarray(pcd.points).copy()
-    print(f"  {len(points)} points, extent: {points.ptp(axis=0).round(2)}")
+    extent = points.max(axis=0) - points.min(axis=0)
+    print(f"  {len(points)} points, extent: {extent.round(2)}")
 
     print("\nEstimating normals...")
     t0 = time.time()
@@ -629,11 +630,14 @@ def main():
     sphere_indices = np.where(surface_labels == 2)[0]
     if len(sphere_indices) > 50:
         sphere_pts = points[sphere_indices]
-        db_sphere = DBSCAN(eps=0.15, min_samples=15).fit(sphere_pts)
+        sphere_eps = 0.05
+        print(f"  {len(sphere_indices)} spherical points, eps={sphere_eps:.3f}m")
+        db_sphere = DBSCAN(eps=sphere_eps, min_samples=15).fit(sphere_pts)
         spheres_found = 0
+        max_sphere_pts = len(points) // 20  # cap at 5% of total points
         for c in range(db_sphere.labels_.max() + 1):
             c_mask = db_sphere.labels_ == c
-            if c_mask.sum() < 30:
+            if c_mask.sum() < 30 or c_mask.sum() > max_sphere_pts:
                 continue
             c_global = sphere_indices[c_mask]
             primitives.append({
